@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -7,9 +7,9 @@ from ecommerce.domain.models import DataOrigin, EventMetadata, SourceIdentity
 
 
 def test_backfill_boundary_is_exclusive() -> None:
-    boundary = datetime(2026, 11, 15, 16, tzinfo=timezone.utc)
+    boundary = datetime(2026, 11, 15, 16, tzinfo=UTC)
     policy = CutoverPolicy(boundary)
-    assert policy.classify(datetime(2026, 7, 1, tzinfo=timezone.utc)) == DataOrigin.SYNTHETIC_BACKFILL
+    assert policy.classify(datetime(2026, 7, 1, tzinfo=UTC)) == DataOrigin.SYNTHETIC_BACKFILL
     assert policy.classify(boundary) == DataOrigin.SHOPIFY_LIVE
 
 
