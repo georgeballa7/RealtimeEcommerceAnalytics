@@ -37,7 +37,10 @@ data "aws_iam_policy_document" "state_tls_only" {
       aws_s3_bucket.terraform_state.arn,
       "${aws_s3_bucket.terraform_state.arn}/*"
     ]
-    principals { type = "*", identifiers = ["*"] }
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
     condition {
       test     = "Bool"
       variable = "aws:SecureTransport"
