@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars (ignored by Git).
+# Confirm that the account and region match the reviewed AWS deployment.
+aws_account_id = "REPLACE_WITH_12_DIGIT_ACCOUNT_ID"
+aws_profile    = "ecommerce-admin"
+aws_region     = "eu-central-1"
+
+# Review instance pricing, storage, backup and secret costs before apply.
+db_instance_class     = "db.t4g.micro"
+db_allocated_storage  = 20
+
+# Application workload deployment is disabled until functional images and TLS are ready.
+# api_image           = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-api-demo@sha256:..."
+# acm_certificate_arn = "arn:aws:acm:eu-central-1:ACCOUNT:certificate/..."
+# consumer_image      = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-consumer-demo@sha256:..."
+# spark_image         = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-spark-demo@sha256:..."
