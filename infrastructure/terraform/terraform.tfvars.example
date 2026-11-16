@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (ignored by Git).
+# Confirm that the account and region match the reviewed AWS deployment.
+aws_account_id = "REPLACE_WITH_12_DIGIT_ACCOUNT_ID"
+aws_profile    = "ecommerce-admin"
+aws_region     = "eu-central-1"
+
+# Review instance pricing, storage, backup and secret costs before apply.
+db_instance_class     = "db.t4g.micro"
+db_allocated_storage  = 20
