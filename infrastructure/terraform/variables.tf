@@ -65,3 +65,50 @@ variable "db_master_username" {
   type        = string
   default     = "ecommerce_admin"
 }
+
+variable "public_subnet_cidrs" {
+  type = list(string)
+  default = ["10.20.0.0/24", "10.20.1.0/24"]
+}
+variable "application_subnet_cidrs" {
+  type = list(string)
+  default = ["10.20.20.0/24", "10.20.21.0/24"]
+}
+variable "environment" {
+  type = string
+  default = "demo"
+}
+variable "api_image" {
+  type = string
+  default = ""
+  description = "Existing working API image. Empty disables application resources."
+}
+variable "acm_certificate_arn" {
+  type = string
+  default = ""
+  description = "Issued ACM certificate in the deployment region; required to enable public API."
+}
+variable "consumer_image" {
+  type = string
+  default = ""
+}
+variable "spark_image" {
+  type = string
+  default = ""
+}
+variable "spark_schedule_expression" {
+  type = string
+  default = "rate(1 hour)"
+}
+variable "sqs_visibility_timeout_seconds" {
+  type = number
+  default = 180
+}
+variable "api_container_port" {
+  type = number
+  default = 8000
+}
+variable "db_multi_az" {
+  type = bool
+  default = false
+}

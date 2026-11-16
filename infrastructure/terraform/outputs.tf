@@ -3,18 +3,18 @@ output "vpc_id" {
   value       = aws_vpc.ecommerce.id
 }
 
-output "private_subnet_ids" {
+output "database_subnet_ids" {
   description = "Subnets for the RDS database subnet group."
   value       = aws_subnet.database[*].id
 }
 
 output "rds_security_group_id" {
-  description = "Database security group, with no ingress rules initially."
+  description = "Database security group; permits ECS task security group on port 5432."
   value       = aws_security_group.rds.id
 }
 
 output "rds_endpoint" {
-  description = "Private RDS endpoint. Requires an approved connection path."
+  description = "Private RDS endpoint used by workloads inside the VPC."
   value       = aws_db_instance.ecommerce.endpoint
 }
 
@@ -22,4 +22,18 @@ output "rds_master_secret_arn" {
   description = "AWS-managed Secrets Manager secret containing the RDS master credentials."
   value       = aws_db_instance.ecommerce.master_user_secret[0].secret_arn
   sensitive   = true
+}
+
+output "public_subnet_ids" { value = aws_subnet.public[*].id }
+output "application_subnet_ids" { value = aws_subnet.application[*].id }
+output "nat_gateway_ids" { value = aws_nat_gateway.ecommerce[*].id }
+output "ecs_cluster_name" { value = aws_ecs_cluster.ecommerce.name }
+output "api_ecr_url" { value = aws_ecr_repository.api.repository_url }
+output "consumer_ecr_url" { value = aws_ecr_repository.consumer.repository_url }
+output "spark_ecr_url" { value = aws_ecr_repository.spark.repository_url }
+output "event_queue_url" { value = aws_sqs_queue.events.url }
+output "event_dlq_url" { value = aws_sqs_queue.events_dlq.url }
+output "landing_bucket_name" { value = aws_s3_bucket.landing.bucket }
+output "api_alb_dns_name" {
+  value = local.enable_api ? aws_lb.api[0].dns_name : null
 }

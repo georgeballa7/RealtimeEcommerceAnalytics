@@ -1,41 +1,29 @@
-# VPC and RDS PostgreSQL
+# E-commerce AWS infrastructure (proposal)
 
-Terraform configuration for the e-commerce project's AWS operational database in `eu-central-1`.
+This Terraform configuration targets **eu-central-1** with a dedicated VPC, public HTTPS ALB, ECS/Fargate application tasks in private application subnets, a private RDS PostgreSQL instance, encrypted SQS queue and DLQ, private S3, and scheduled PySpark (single-container microbatch).
 
-## Scope
+Network: two public subnets with Internet Gateway, two application subnets with one NAT Gateway per AZ, and two isolated RDS subnets **without any internet default route**. RDS accepts TCP 5432 only from the ECS application security group.
 
-- A dedicated VPC (`10.20.0.0/16`) with two private database subnets in separate Availability Zones.
-- A private route table without an Internet Gateway or NAT Gateway.
-- A Single-AZ, encrypted PostgreSQL RDS instance with a DB subnet group spanning both AZs.
-- An RDS security group with **no inbound rules** until the private-client access path is approved.
-- AWS-managed RDS master credentials in Secrets Manager rather than a password in Terraform variables.
+## Readiness
 
-This is a proposed infrastructure configuration, not a deployment. **The RDS database will be unreachable from local Kubernetes until a secure connection path is approved.** That solution may need extra AWS resources and additional costs.
+This is an **infrastructure foundation**. The repository still contains application scaffolding. The API is disabled until `api_image` and an issued regional ACM certificate are configured. The SQS consumer is disabled until `consumer_image` is supplied. Spark task definition is disabled until `spark_image` exists, and the schedule remains **DISABLED** even after the image is supplied. Images must be functional, tested, and use least-privilege application credentials and verified TLS. Production Shopify HMAC verification, idempotent transaction/outbox handling, database migrations, Redshift loads, and actual processing logic are not yet implemented.
 
-## Before deployment
-
-1. Confirm the AWS Budget and regional cost of RDS instance-hours, provisioned storage, backups and Secrets Manager. Budget alerts are not hard spending limits.
-2. Confirm `aws sts get-caller-identity --profile ecommerce-admin` returns the expected AWS account.
-3. Copy `terraform.tfvars.example` to `terraform.tfvars`, replace the account placeholder and review the region, instance class and storage allocation.
-4. Agree on a secure connection method from local Kubernetes to private RDS before any apply.
-5. Run the following on your computer:
+## Review before applying
 
 ```powershell
 cd infrastructure/terraform
+Copy-Item terraform.tfvars.example terraform.tfvars
+# Set expected account ID, check region and estimated costs
 terraform init
 terraform fmt -check
 terraform validate
 terraform plan -out=ecommerce.tfplan
 ```
 
-Review the plan, expected costs and network access approach before running `terraform apply ecommerce.tfplan`. Pull requests do not automatically deploy infrastructure.
+Review the account, resource counts, region, security rules and spend before applying. Two NAT Gateways, Elastic IPs, RDS and potential ALB/Fargate tasks are billable even when idle. AWS Budget alerts are not spend limits. Terraform state contains sensitive information: keep it out of Git and configure protected state and locking before collaborative or CI-managed apply.
 
-## Security and teardown
+## Reliability and security
 
-- The database is private, its security group has no ingress, and the private route table has only the local VPC route.
-- The RDS master secret is created by AWS; do not paste or commit credentials.
-- The template does not deploy EC2, NAT, a VPN, VPC endpoints, S3, or Redshift. Those services are separate work packages.
-- Local Terraform state must be protected and never committed. Introduce a secured remote backend before unattended deployments or multi-machine use.
-- Deletion protection is enabled. To tear down development RDS, first change `deletion_protection` to `false` and apply that change; then review the destroy plan. The configuration skips a final snapshot, so preserve required data separately.
+The AWS deployment uses SQS standard queue plus DLQ and S3 as the durable replay source. Consumer code must write idempotently to S3 *before* acknowledging SQS. Spark runs scheduled microbatches using PySpark local mode, **not** continuous distributed Structured Streaming. Add watermarking, non-overlap protection, observable metrics and alarms before enabling automated runs. A real customer deployment would require capacity testing, Multi-AZ RDS, multiple healthy API tasks, dedicated app/database roles, WAF and recovery validation. Never use the RDS master account for the API. RDS deletion protection is enabled and a final snapshot is configured.
 
-**Validation status:** Terraform syntax, provider initialization and deployment plan have not been executed or verified in AWS.
+Nothing is automatically deployed from this PR; Redshift, completed apps, Shopify integration and Power BI are separate outstanding implementation work.

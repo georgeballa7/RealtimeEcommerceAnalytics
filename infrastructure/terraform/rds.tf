@@ -15,12 +15,13 @@ resource "aws_db_instance" "ecommerce" {
   db_subnet_group_name   = aws_db_subnet_group.ecommerce.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
-  multi_az               = false
+  multi_az               = var.db_multi_az
 
-  backup_retention_period = 1
+  backup_retention_period = 7
   copy_tags_to_snapshot   = true
   deletion_protection     = true
-  skip_final_snapshot     = true
+  skip_final_snapshot     = false
+  final_snapshot_identifier = "ecommerce-postgres-final-${var.environment}"
 
   auto_minor_version_upgrade = true
   apply_immediately          = false
