@@ -24,6 +24,17 @@ resource "aws_iam_role_policy_attachment" "ecs_execution" {
   role = aws_iam_role.ecs_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+resource "aws_iam_role" "api_execution" {
+  name = "ecommerce-api-execution-${var.environment}"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+}
+resource "aws_iam_role_policy_attachment" "api_execution" {
+  role       = aws_iam_role.api_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
 resource "aws_iam_role" "api_task" {
   name = "ecommerce-api-task-${var.environment}"
   assume_role_policy = jsonencode({
@@ -76,7 +87,7 @@ resource "aws_ecs_task_definition" "api" {
   network_mode = "awsvpc"
   cpu = "256"
   memory = "512"
-  execution_role_arn = aws_iam_role.ecs_execution.arn
+  execution_role_arn = aws_iam_role.api_execution.arn
   task_role_arn = aws_iam_role.api_task.arn
   container_definitions = jsonencode([{
     name = "api", image = var.api_image, essential = true,
@@ -86,6 +97,10 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DB_HOST", value = aws_db_instance.ecommerce.address },
       { name = "DB_PORT", value = "5432" },
       { name = "DB_SSLMODE", value = "verify-full" }
+    ],
+    secrets = [
+      { name = "DB_USER", valueFrom = "${aws_secretsmanager_secret.api_database.arn}:username::" },
+      { name = "DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.api_database.arn}:password::" }
     ],
     logConfiguration = {
       logDriver = "awslogs",

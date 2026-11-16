@@ -27,3 +27,9 @@ Review the account, resource counts, region, security rules and spend before app
 The AWS deployment uses SQS standard queue plus DLQ and S3 as the durable replay source. Consumer code must write idempotently to S3 *before* acknowledging SQS. Spark runs scheduled microbatches using PySpark local mode, **not** continuous distributed Structured Streaming. Add watermarking, non-overlap protection, observable metrics and alarms before enabling automated runs. A real customer deployment would require capacity testing, Multi-AZ RDS, multiple healthy API tasks, dedicated app/database roles, WAF and recovery validation. Never use the RDS master account for the API. RDS deletion protection is enabled and a final snapshot is configured.
 
 Nothing is automatically deployed from this PR; Redshift, completed apps, Shopify integration and Power BI are separate outstanding implementation work.
+
+## Terraform state and operational safeguards
+
+Provision the independent S3 remote-state bucket from `../bootstrap/` first. Then copy `backend.tf.example` to the ignored local `backend.tf`, replace the placeholder and reinitialize Terraform. The bootstrap root retains a securely backed-up local state. Native S3 lockfiles require Terraform 1.10 or later; never commit state or plan artifacts.
+
+The application database secret is created **without a secret value**. Populate it securely and create a matching least-privilege PostgreSQL user before enabling API tasks; the API execution role can only retrieve this secret. CloudWatch alarms monitor SQS DLQ messages, event backlog age and RDS CPU and send to an SNS topic; email subscriptions are not yet configured. Finish integration testing, broader monitoring and IAM review before deployment.
