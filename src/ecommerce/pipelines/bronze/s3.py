@@ -15,7 +15,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from ecommerce.pipelines.historical_bronze import file_sha256, ingest_historical_bronze
+from ecommerce.pipelines.bronze.historical import file_sha256, ingest_historical_bronze
 
 DEFAULT_PREFIX = "historical/online_retail_ii/bronze/v1"
 EXPECTED_FULL_ROWS = 1_067_371

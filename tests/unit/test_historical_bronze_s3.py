@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from ecommerce.pipelines.historical_bronze_s3 import upload_verified_bronze
+from ecommerce.pipelines.bronze.s3 import upload_verified_bronze
 
 
 class FakeClientError(Exception):
@@ -123,7 +123,7 @@ def test_bad_remote_hash_blocks_manifest(tmp_path: Path):
 
 def test_manifest_is_commit_marker_without_parquet_dependency(tmp_path: Path, monkeypatch):
     """Exercise the upload path even where pyarrow is unavailable."""
-    import ecommerce.pipelines.historical_bronze_s3 as mod
+    import ecommerce.pipelines.bronze.s3 as mod
 
     source = tmp_path / "source.xlsx"
     source.write_bytes(b"original workbook")

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import boto3
 
-from ecommerce.pipelines.historical_bronze_s3 import terraform_landing_bucket
-from ecommerce.pipelines.historical_silver import (
+from ecommerce.pipelines.bronze.s3 import terraform_landing_bucket
+from ecommerce.pipelines.silver.historical import (
     DEFAULT_BRONZE_PREFIX, DEFAULT_SILVER_PREFIX, publish_silver,
 )
 

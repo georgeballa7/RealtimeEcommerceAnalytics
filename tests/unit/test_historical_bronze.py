@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from ecommerce.pipelines.historical_bronze import file_sha256, ingest_historical_bronze
+from ecommerce.pipelines.bronze.historical import file_sha256, ingest_historical_bronze
 
 
 @pytest.fixture

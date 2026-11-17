@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from ecommerce.pipelines.historical_silver import transform_bronze
+from ecommerce.pipelines.silver.historical import transform_bronze
 
 
 def source_rows():

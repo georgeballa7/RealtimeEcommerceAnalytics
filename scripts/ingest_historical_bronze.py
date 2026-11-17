@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from ecommerce.pipelines.historical_bronze_s3 import (
+from ecommerce.pipelines.bronze.s3 import (
     DEFAULT_PREFIX,
     terraform_landing_bucket,
     upload_verified_bronze,
