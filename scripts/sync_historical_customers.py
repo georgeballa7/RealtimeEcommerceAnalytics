@@ -1,4 +1,4 @@
-"""Shopify historical customer sync: read-only by default, explicit small-batch writes.
+"""Shopify historical sync: on-demand, read-only by default, bounded progress batches.
 
 Run only from repository root. AWS source Silver is read-only. RDS app user
 must have only required table permissions. No token is written to disk.
@@ -13,7 +13,7 @@ import boto3
 import psycopg
 from psycopg.conninfo import make_conninfo
 
-from ecommerce.application.use_cases.shopify_customer_sync import synchronize_customers
+from ecommerce.application.use_cases.shopify_customer_sync import customer_batches, synchronize_customers
 from ecommerce.infrastructure.postgres.customer_sync_ledger import PostgresCustomerSyncLedger
 from ecommerce.infrastructure.postgres.customer_identity import (
     HistoricalCustomer, PostgresCustomerIdentityRepository,
@@ -28,15 +28,18 @@ def main() -> None:
     parser.add_argument("--prefix", default="historical/online_retail_ii/silver/v1")
     parser.add_argument("--aws-profile", default=None, help="Optional developer CLI profile")
     parser.add_argument("--aws-region", default="eu-central-1")
-    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--limit", type=int, default=5,
+                        help="Maximum selected customers (0-5942); explicitly set 5942 for full sync")
+    parser.add_argument("--batch-size", type=int, default=100,
+                        help="Progress boundary (1-1000); each customer is persisted individually")
     parser.add_argument("--start-after", default=None,
                         help="Resume after this canonical UUID (sorted ascending)")
     parser.add_argument("--allow-customer-writes", action="store_true")
     args = parser.parse_args()
-    if not 0 <= args.limit <= 5 and args.allow_customer_writes:
-        parser.error("Write-mode limit is capped at five per invocation")
-    if args.limit < 0:
-        parser.error("Limit cannot be negative")
+    if not 0 <= args.limit <= 5942:
+        parser.error("--limit must be between 0 and 5942")
+    if not 1 <= args.batch_size <= 1000:
+        parser.error("--batch-size must be between 1 and 1000")
     if args.start_after is not None:
         try:
             if str(UUID(args.start_after)) != args.start_after:
@@ -75,10 +78,24 @@ def main() -> None:
                              sslrootcert=os.environ["DB_SSLROOTCERT"], autocommit=True) as conn:
             repo = PostgresCustomerIdentityRepository(conn, shop_gid)
             ledger = PostgresCustomerSyncLedger(conn, shop_gid)
-            result = synchronize_customers(records, api, repo,
-                                           allow_write=args.allow_customer_writes,
-                                           limit=args.limit, ledger=ledger)
-            print(result)
+            selection = records[:args.limit]
+            total_processed = total_skipped = total_verified = 0
+            print(f"Mode: {'WRITE' if args.allow_customer_writes else 'READ ONLY'}; "
+                  f"selected={len(selection)}; batch_size={args.batch_size}", flush=True)
+            for batch_number, batch in enumerate(customer_batches(selection, args.batch_size), start=1):
+                # Stop on failure. Previous successful mappings remain durable;
+                # restart from the beginning to reconcile ambiguous remote writes.
+                result = synchronize_customers(batch, api, repo,
+                                               allow_write=args.allow_customer_writes,
+                                               ledger=ledger)
+                total_processed += result.processed
+                total_skipped += result.skipped_existing
+                total_verified += result.verified_new
+                print(f"Batch {batch_number}: processed={result.processed}, "
+                      f"skipped={result.skipped_existing}, verified_new={result.verified_new}; "
+                      f"total_processed={total_processed}", flush=True)
+            print(f"Summary: processed={total_processed}, skipped={total_skipped}, "
+                  f"verified_new={total_verified}", flush=True)
             print(f"Verified mappings in PostgreSQL: {repo.count_verified()}/5942")
 
 
