@@ -4,10 +4,12 @@ No cross-system atomic transaction is implied: read-back by custom ID protects
 retries following an ambiguous Shopify response or interrupted database commit.
 """
 from __future__ import annotations
+
+from collections.abc import Iterable
 from contextlib import nullcontext
-from itertools import islice
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from itertools import islice
+from typing import Protocol
 from uuid import UUID
 
 from ecommerce.infrastructure.postgres.customer_identity import HistoricalCustomer
@@ -55,9 +57,10 @@ def synchronize_customers(customers: Iterable[HistoricalCustomer], api: Customer
         context = ledger.claim(customer.customer_id) if ledger else nullcontext()
         with context:
             def record(phase: str, outcome: str, gid: str | None = None,
-                       code: str | None = None) -> None:
+                       code: str | None = None, *, customer_id: str = customer.customer_id) -> None:
+                # Bind the current iteration's identity, not the loop variable.
                 if ledger:
-                    ledger.record(customer.customer_id, AttemptEvent(phase, outcome, gid, code))
+                    ledger.record(customer_id, AttemptEvent(phase, outcome, gid, code))
 
             stage = "lookup"
             try:
