@@ -214,7 +214,30 @@ class ShopifyGraphQLClient:
                             {"identifier": {"customId": self._custom_id(canonical_id)},
                              "input": {}}, mutation=True).get("customerSet") or {}
         if result.get("userErrors"):
-            raise ShopifyError("Shopify customerSet returned validation errors")
+            # Shopify messages and complete response bodies can contain customer
+            # information. Emit only strictly validated error codes/field paths.
+            diagnostics = []
+            for error in result["userErrors"]:
+                if not isinstance(error, dict):
+                    diagnostics.append("UNKNOWN")
+                    continue
+                code = error.get("code")
+                safe_code = (code if isinstance(code, str)
+                             and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code)
+                             else "UNKNOWN")
+                fields = error.get("field")
+                safe_fields = []
+                if isinstance(fields, list):
+                    for field in fields[:8]:
+                        if (isinstance(field, str)
+                                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}|[0-9]{1,6}", field)):
+                            safe_fields.append(field)
+                field_label = ".".join(safe_fields) if safe_fields else "unspecified"
+                diagnostics.append(f"{safe_code}@{field_label}")
+            raise ShopifyError(
+                "Shopify customerSet validation errors: "
+                + ", ".join(diagnostics[:10])
+            )
         customer = result.get("customer") or {}
         return self._validate_gid(customer.get("id"))
 
