@@ -24,7 +24,7 @@ class FakeAPI:
     def lookup_customer(self, key):
         return self.items.get(key)
 
-    def upsert_customer(self, key):
+    def upsert_customer(self, key, source_customer_id):
         self.writes += 1
         self.items[key] = "gid://shopify/Customer/123"
         return self.items[key]
@@ -98,7 +98,7 @@ def test_unsafe_graphql_mutation_transport_error_is_not_retried():
     cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
     client = ShopifyGraphQLClient(cfg, client=httpx.Client(transport=httpx.MockTransport(fail)))
     with pytest.raises(ShopifyError):
-        client.upsert_customer(str(uuid4()))
+        client.upsert_customer(str(uuid4()), "17850")
     assert len(attempts) == 1
 
 
@@ -137,7 +137,7 @@ def test_resume_after_partial_batch_failure_does_not_repeat_writes():
 
     api, repo = FailingOnceAPI(), FakeRepo()
     # FakeRepo enforces unique Shopify GIDs; assign a fresh ID per customer.
-    def upsert(key):
+    def upsert(key, source_customer_id):
         api.writes += 1
         api.items[key] = f"gid://shopify/Customer/{api.writes}"
         return api.items[key]
@@ -164,7 +164,7 @@ def test_shopify_validation_errors_include_safe_codes_and_fields_only():
     def respond(request):
         import json
         payload = json.loads(request.content)
-        assert payload["variables"]["input"] == {}
+        assert payload["variables"]["input"] == {"firstName": "HC17850"}
         return httpx.Response(200, json={"data": {"customerSet": {
             "customer": None,
             "userErrors": [
@@ -180,7 +180,7 @@ def test_shopify_validation_errors_include_safe_codes_and_fields_only():
         ShopifyGraphQLClient(cfg, client=http) as api,
         pytest.raises(ShopifyError) as err,
     ):
-        api.upsert_customer(uid)
+        api.upsert_customer(uid, "17850")
     msg = str(err.value)
     assert "MISSING_FIELD_REQUIRED@input.email" in msg
     assert "INPUT_MISMATCH@identifier.customId" in msg
@@ -208,7 +208,42 @@ def test_shopify_validation_diagnostics_reject_unsafe_fields_and_codes():
         ShopifyGraphQLClient(cfg, client=http) as api,
         pytest.raises(ShopifyError) as err,
     ):
-        api.upsert_customer(str(uuid4()))
+        api.upsert_customer(str(uuid4()), "17850")
     assert "Shopify customerSet validation errors: UNKNOWN@input, UNKNOWN@unspecified" == str(err.value)
     assert "private@example.com" not in str(err.value)
     assert "Do not log" not in str(err.value)
+
+
+def test_customer_set_uses_short_source_id_name_without_email():
+    uid = str(uuid4())
+
+    def respond(request):
+        import json
+        payload = json.loads(request.content)
+        assert payload["variables"]["identifier"]["customId"]["value"] == uid
+        assert payload["variables"]["input"] == {"firstName": "HC17850"}
+        return httpx.Response(200, json={"data": {"customerSet": {
+            "customer": {"id": "gid://shopify/Customer/42"},
+            "userErrors": [],
+        }}})
+
+    cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
+    with (
+        httpx.Client(transport=httpx.MockTransport(respond)) as http,
+        ShopifyGraphQLClient(cfg, client=http) as api,
+    ):
+        assert api.upsert_customer(uid, "17850") == "gid://shopify/Customer/42"
+
+
+def test_customer_set_rejects_invalid_source_id_before_mutation():
+    cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
+
+    def unexpected(_request):
+        pytest.fail("Invalid source ID must never reach Shopify")
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(unexpected)) as http,
+        ShopifyGraphQLClient(cfg, client=http) as api,
+    ):
+        with pytest.raises(ValueError, match="numeric historical source"):
+            api.upsert_customer(str(uuid4()), "not-an-id")
