@@ -5,13 +5,16 @@ must have only required table permissions. No token is written to disk.
 """
 from __future__ import annotations
 
+from uuid import UUID
 import argparse
 import os
 
 import boto3
 import psycopg
+from psycopg.conninfo import make_conninfo
 
 from ecommerce.application.use_cases.shopify_customer_sync import synchronize_customers
+from ecommerce.infrastructure.postgres.customer_sync_ledger import PostgresCustomerSyncLedger
 from ecommerce.infrastructure.postgres.customer_identity import (
     HistoricalCustomer, PostgresCustomerIdentityRepository,
 )
@@ -23,16 +26,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--prefix", default="historical/online_retail_ii/silver/v1")
-    parser.add_argument("--aws-profile", default="ecommerce-admin")
+    parser.add_argument("--aws-profile", default=None, help="Optional developer CLI profile")
     parser.add_argument("--aws-region", default="eu-central-1")
     parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--start-after", default=None,
+                        help="Resume after this canonical UUID (sorted ascending)")
     parser.add_argument("--allow-customer-writes", action="store_true")
     args = parser.parse_args()
     if not 0 <= args.limit <= 5 and args.allow_customer_writes:
         parser.error("Write-mode limit is capped at five per invocation")
     if args.limit < 0:
         parser.error("Limit cannot be negative")
-    required = ["SHOPIFY_SHOP_DOMAIN", "SHOPIFY_ADMIN_TOKEN", "ECOMMERCE_DATABASE_URL"]
+    if args.start_after is not None:
+        try:
+            if str(UUID(args.start_after)) != args.start_after:
+                raise ValueError("not canonical")
+        except ValueError:
+            parser.error("--start-after must be a canonical UUID")
+    required = ["SHOPIFY_SHOP_DOMAIN", "SHOPIFY_ADMIN_TOKEN", "DB_HOST", "DB_NAME",
+                "DB_USER", "DB_PASSWORD", "DB_SSLROOTCERT"]
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         parser.error("Missing environment settings: " + ", ".join(missing))
@@ -46,14 +58,24 @@ def main() -> None:
         parser.error("Expected exactly 5,942 unique Silver customers")
     records = [HistoricalCustomer(str(row.customer_id), str(row.source_customer_id))
                for row in customers.sort_values("customer_id").itertuples(index=False)]
+    if args.start_after is not None:
+        records = [customer for customer in records if customer.customer_id > args.start_after]
     with ShopifyGraphQLClient(cfg) as api:
         shop_gid, _ = api.verify_shop()
         api.verify_custom_id_definition()
-        with psycopg.connect(os.environ["ECOMMERCE_DATABASE_URL"], sslmode="verify-full") as conn:
+        if not os.path.isfile(os.environ["DB_SSLROOTCERT"]):
+            parser.error("DB_SSLROOTCERT must reference a readable CA bundle")
+        conninfo = make_conninfo("", host=os.environ["DB_HOST"],
+                                 port=os.environ.get("DB_PORT", "5432"),
+                                 dbname=os.environ["DB_NAME"], user=os.environ["DB_USER"],
+                                 password=os.environ["DB_PASSWORD"])
+        with psycopg.connect(conninfo, sslmode="verify-full",
+                             sslrootcert=os.environ["DB_SSLROOTCERT"], autocommit=True) as conn:
             repo = PostgresCustomerIdentityRepository(conn, shop_gid)
+            ledger = PostgresCustomerSyncLedger(conn, shop_gid)
             result = synchronize_customers(records, api, repo,
                                            allow_write=args.allow_customer_writes,
-                                           limit=args.limit)
+                                           limit=args.limit, ledger=ledger)
             print(result)
             print(f"Verified mappings in PostgreSQL: {repo.count_verified()}/5942")
 
