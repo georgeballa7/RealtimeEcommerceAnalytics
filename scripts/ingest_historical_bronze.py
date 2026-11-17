@@ -1,21 +1,32 @@
-"""CLI entrypoint for the historical Bronze export."""
+"""Publish the Online Retail II Bronze dataset to the deployed AWS S3 landing bucket."""
 
 import argparse
 from pathlib import Path
 
-from ecommerce.pipelines.historical_bronze import ingest_historical_bronze
+from ecommerce.pipelines.historical_bronze_s3 import (
+    DEFAULT_PREFIX,
+    terraform_landing_bucket,
+    upload_verified_bronze,
+)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Export Online Retail II worksheets to immutable Bronze Parquet")
+    parser = argparse.ArgumentParser(description="Publish verified Online Retail II Bronze data to S3")
     parser.add_argument("--source", type=Path, default=Path("data/raw/online_retail_II.xlsx"))
-    parser.add_argument("--destination", type=Path, default=Path("data/bronze/online_retail_ii/v1"))
+    parser.add_argument("--bucket", help="Override the deployed Terraform landing_bucket_name")
+    parser.add_argument("--terraform-dir", type=Path, default=Path("infrastructure/terraform"))
+    parser.add_argument("--prefix", default=DEFAULT_PREFIX)
+    parser.add_argument("--aws-profile", default="ecommerce-admin")
+    parser.add_argument("--region", default="eu-central-1")
     args = parser.parse_args()
-    manifest = ingest_historical_bronze(args.source, args.destination)
-    print(f"Bronze export complete: {manifest['total_rows']:,} rows across "
-          f"{manifest['worksheet_count']} worksheets")
-    print(f"Source SHA-256: {manifest['source_sha256']}")
-    print(f"Export: {args.destination}")
+    bucket = args.bucket or terraform_landing_bucket(args.terraform_dir)
+    published = upload_verified_bronze(
+        args.source, bucket=bucket, prefix=args.prefix,
+        aws_profile=args.aws_profile, region=args.region,
+    )
+    print(f"Published and verified {published['total_rows']:,} Bronze lines")
+    print(f"S3 dataset: s3://{bucket}/{args.prefix.strip('/')}/")
+    print(f"Manifest: s3://{bucket}/{args.prefix.strip('/')}/manifest.json")
 
 
 if __name__ == "__main__":
