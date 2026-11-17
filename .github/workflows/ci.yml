@@ -16,4 +16,5 @@ jobs:
       - name: Check formatting and lint
         run: ruff check src apps tests
       - name: Run local unit tests
+        if: success() || failure()
         run: pytest -q tests/unit
