@@ -209,10 +209,15 @@ class ShopifyGraphQLClient:
         customer = self.query(CUSTOMER_BY_CUSTOM_ID, {"identifier": {"customId": identity}}).get("customerByIdentifier")
         return self._validate_gid(customer.get("id")) if customer else None
 
-    def upsert_customer(self, canonical_id: str) -> str:
+    def upsert_customer(self, canonical_id: str, source_customer_id: str) -> str:
+        # Historical source IDs are identifiers, not names. The short display
+        # name distinguishes imported records without inventing contact data.
+        if not re.fullmatch(r"[0-9]{1,20}", source_customer_id):
+            raise ValueError("Expected numeric historical source customer ID")
         result = self.query(CUSTOMER_SET_GENERIC,
                             {"identifier": {"customId": self._custom_id(canonical_id)},
-                             "input": {}}, mutation=True).get("customerSet") or {}
+                             "input": {"firstName": f"HC{source_customer_id}"}},
+                            mutation=True).get("customerSet") or {}
         if result.get("userErrors"):
             # Shopify messages and complete response bodies can contain customer
             # information. Emit only strictly validated error codes/field paths.
