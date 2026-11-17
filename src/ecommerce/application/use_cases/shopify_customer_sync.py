@@ -18,7 +18,7 @@ from ecommerce.infrastructure.postgres.customer_sync_ledger import AttemptEvent
 
 class CustomerAPI(Protocol):
     def lookup_customer(self, canonical_id: str) -> str | None: ...
-    def upsert_customer(self, canonical_id: str) -> str: ...
+    def upsert_customer(self, canonical_id: str, source_customer_id: str) -> str: ...
 
 
 class MappingRepository(Protocol):
@@ -78,7 +78,7 @@ def synchronize_customers(customers: Iterable[HistoricalCustomer], api: Customer
                 if remote is None:
                     stage = "upsert"
                     record("upsert", "started")  # durable BEFORE remote mutation
-                    api.upsert_customer(customer.customer_id)
+                    api.upsert_customer(customer.customer_id, customer.source_customer_id)
                     stage = "reconcile"
                     record("reconcile", "started")
                     remote = api.lookup_customer(customer.customer_id)
