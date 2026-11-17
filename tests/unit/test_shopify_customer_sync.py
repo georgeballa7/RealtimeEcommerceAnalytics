@@ -175,10 +175,12 @@ def test_shopify_validation_errors_include_safe_codes_and_fields_only():
             ],
         }}})
     cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
-    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
-        with ShopifyGraphQLClient(cfg, client=http) as api:
-            with pytest.raises(ShopifyError) as err:
-                api.upsert_customer(uid)
+    with (
+        httpx.Client(transport=httpx.MockTransport(respond)) as http,
+        ShopifyGraphQLClient(cfg, client=http) as api,
+        pytest.raises(ShopifyError) as err,
+    ):
+        api.upsert_customer(uid)
     msg = str(err.value)
     assert "MISSING_FIELD_REQUIRED@input.email" in msg
     assert "INPUT_MISMATCH@identifier.customId" in msg
@@ -201,10 +203,12 @@ def test_shopify_validation_diagnostics_reject_unsafe_fields_and_codes():
             ],
         }}})
     cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
-    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
-        with ShopifyGraphQLClient(cfg, client=http) as api:
-            with pytest.raises(ShopifyError) as err:
-                api.upsert_customer(str(uuid4()))
+    with (
+        httpx.Client(transport=httpx.MockTransport(respond)) as http,
+        ShopifyGraphQLClient(cfg, client=http) as api,
+        pytest.raises(ShopifyError) as err,
+    ):
+        api.upsert_customer(str(uuid4()))
     assert "Shopify customerSet validation errors: UNKNOWN@input, UNKNOWN@unspecified" == str(err.value)
     assert "private@example.com" not in str(err.value)
     assert "Do not log" not in str(err.value)
