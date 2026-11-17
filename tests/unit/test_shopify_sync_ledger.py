@@ -1,6 +1,7 @@
 """No AWS, Shopify or PostgreSQL required: verify event ordering/retry safety."""
 from contextlib import contextmanager
 from uuid import uuid4
+
 import pytest
 
 from ecommerce.application.use_cases.shopify_customer_sync import synchronize_customers
@@ -41,7 +42,8 @@ class API:
     def lookup_customer(self, cid):
         return self.items.get(cid)
 
-    def upsert_customer(self, cid):
+    def upsert_customer(self, cid, source_customer_id):
+        assert source_customer_id == "17850"
         self.writes += 1
         self.items[cid] = "gid://shopify/Customer/987"
         if self.timeout_once:
