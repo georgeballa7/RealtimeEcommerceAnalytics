@@ -18,7 +18,7 @@ from ecommerce.infrastructure.postgres.customer_sync_ledger import PostgresCusto
 from ecommerce.infrastructure.postgres.customer_identity import (
     HistoricalCustomer, PostgresCustomerIdentityRepository,
 )
-from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyGraphQLClient
+from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyGraphQLClient, ShopifyClientCredentials
 from ecommerce.pipelines.silver.audit import read_published_silver
 
 
@@ -43,13 +43,12 @@ def main() -> None:
                 raise ValueError("not canonical")
         except ValueError:
             parser.error("--start-after must be a canonical UUID")
-    required = ["SHOPIFY_SHOP_DOMAIN", "SHOPIFY_ADMIN_TOKEN", "DB_HOST", "DB_NAME",
+    required = ["SHOPIFY_SHOP_DOMAIN", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "DB_HOST", "DB_NAME",
                 "DB_USER", "DB_PASSWORD", "DB_SSLROOTCERT"]
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         parser.error("Missing environment settings: " + ", ".join(missing))
-    cfg = ShopifyConfig(shop_domain=os.environ["SHOPIFY_SHOP_DOMAIN"],
-                        token=os.environ["SHOPIFY_ADMIN_TOKEN"])
+    cfg = ShopifyConfig(shop_domain=os.environ["SHOPIFY_SHOP_DOMAIN"])
     session = boto3.Session(profile_name=args.aws_profile, region_name=args.aws_region)
     s3 = session.client("s3")
     tables, _, _ = read_published_silver(s3, args.bucket, args.prefix)
@@ -60,7 +59,10 @@ def main() -> None:
                for row in customers.sort_values("customer_id").itertuples(index=False)]
     if args.start_after is not None:
         records = [customer for customer in records if customer.customer_id > args.start_after]
-    with ShopifyGraphQLClient(cfg) as api:
+    provider = ShopifyClientCredentials(cfg.shop_domain,
+                                        os.environ["SHOPIFY_CLIENT_ID"],
+                                        os.environ["SHOPIFY_CLIENT_SECRET"])
+    with ShopifyGraphQLClient(cfg, token_provider=provider) as api:
         shop_gid, _ = api.verify_shop()
         api.verify_custom_id_definition()
         if not os.path.isfile(os.environ["DB_SSLROOTCERT"]):

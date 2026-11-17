@@ -20,7 +20,7 @@ class ShopifyError(RuntimeError):
 @dataclass(frozen=True)
 class ShopifyConfig:
     shop_domain: str
-    token: str
+    token: str | None = None
     api_version: str = "2026-07"
     metafield_namespace: str = "custom"
     metafield_key: str = "ecommerce_canonical_customer_id"
@@ -28,8 +28,8 @@ class ShopifyConfig:
     def __post_init__(self):
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*\.myshopify\.com", self.shop_domain):
             raise ValueError("Expected a myshopify.com shop domain, not an arbitrary URL")
-        if not self.token.strip():
-            raise ValueError("Shopify token is missing")
+        if self.token is not None and not self.token.strip():
+            raise ValueError("Shopify token is blank")
         if not re.fullmatch(r"20\d{2}-(01|04|07|10)", self.api_version):
             raise ValueError("Invalid Shopify API version")
         if not re.fullmatch(r"[A-Za-z0-9_-]+", self.metafield_namespace):
@@ -55,11 +55,70 @@ CUSTOMER_BY_CUSTOM_ID = """query CustomerByCanonicalId($identifier: CustomerIden
 }"""
 
 
+class ShopifyClientCredentials:
+    """In-memory OAuth token cache with early renewal."""
+
+    def __init__(self, shop_domain: str, client_id: str, client_secret: str,
+                 *, client: httpx.Client | None = None,
+                 clock: Callable[[], float] = time.monotonic):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*\.myshopify\.com", shop_domain):
+            raise ValueError("Invalid Shopify shop domain")
+        if not client_id.strip() or not client_secret.strip():
+            raise ValueError("Missing Shopify client credentials")
+        self.shop_domain = shop_domain
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._client = client or httpx.Client(timeout=30)
+        self._owns_client = client is None
+        self._clock = clock
+        self._token: str | None = None
+        self._expires_at = 0.0
+
+    def close(self):
+        if self._owns_client:
+            self._client.close()
+
+    def invalidate(self):
+        self._token = None
+        self._expires_at = 0.0
+
+    def get_token(self) -> str:
+        if self._token and self._clock() < self._expires_at:
+            return self._token
+        try:
+            response = self._client.post(
+                f"https://{self.shop_domain}/admin/oauth/access_token",
+                data={"grant_type": "client_credentials",
+                      "client_id": self._client_id,
+                      "client_secret": self._client_secret},
+            )
+            response.raise_for_status()
+            body = response.json()
+            token, expires_in = body["access_token"], body["expires_in"]
+            if not isinstance(token, str) or not token.strip():
+                raise ValueError("Invalid access token")
+            if (isinstance(expires_in, bool) or not isinstance(expires_in, (int, float))
+                    or not 0 < expires_in <= 31536000):
+                raise ValueError("Invalid token expiry")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            self.invalidate()
+            raise ShopifyError("Shopify OAuth token acquisition failed") from exc
+        self._token = token
+        self._expires_at = self._clock() + max(0, float(expires_in) - min(300, float(expires_in) / 10))
+        return token
+
+
 class ShopifyGraphQLClient:
     def __init__(self, config: ShopifyConfig, *, client: httpx.Client | None = None,
-                 sleep: Callable[[float], None] = time.sleep, max_attempts: int = 4):
+                 sleep: Callable[[float], None] = time.sleep, max_attempts: int = 4,
+                 token_provider: ShopifyClientCredentials | None = None):
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive")
+        if (config.token is None) == (token_provider is None):
+            raise ValueError("Provide exactly one authentication method")
+        if token_provider and token_provider.shop_domain != config.shop_domain:
+            raise ValueError("OAuth provider shop mismatch")
+        self._token_provider = token_provider
         self.config = config
         self._client = client or httpx.Client(timeout=30.0)
         self._owns_client = client is None
@@ -75,6 +134,8 @@ class ShopifyGraphQLClient:
     def close(self):
         if self._owns_client:
             self._client.close()
+        if self._token_provider is not None:
+            self._token_provider.close()
 
     def query(self, document: str, variables: dict | None = None, *, mutation: bool = False) -> dict:
         url = f"https://{self.config.shop_domain}/admin/api/{self.config.api_version}/graphql.json"
@@ -85,13 +146,19 @@ class ShopifyGraphQLClient:
             try:
                 resp = self._client.post(
                     url, json={"query": document, "variables": variables or {}},
-                    headers={"X-Shopify-Access-Token": self.config.token,
+                    headers={"X-Shopify-Access-Token": (self._token_provider.get_token()
+                             if self._token_provider is not None else self.config.token),
                              "Content-Type": "application/json"})
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 if mutation or attempt == self.max_attempts - 1:
                     raise ShopifyError("Network failure; reconcile custom ID before retry") from exc
                 self._sleep(min(2 ** attempt, 8))
                 continue
+            if resp.status_code == 401 and self._token_provider is not None:
+                self._token_provider.invalidate()
+                if not mutation and attempt < self.max_attempts - 1:
+                    continue
+                raise ShopifyError("Shopify authentication rejected; token invalidated")
             if resp.status_code == 429 and attempt < self.max_attempts - 1:
                 retry_header = resp.headers.get("Retry-After", "1")
                 try:

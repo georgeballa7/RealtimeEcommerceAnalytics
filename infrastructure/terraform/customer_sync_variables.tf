@@ -10,8 +10,8 @@ variable "shopify_shop_domain" {
   default     = ""
 }
 
-variable "shopify_admin_secret_arn" {
-  description = "Pre-existing Secrets Manager secret ARN holding the Shopify Admin API token as a plain string."
+variable "shopify_client_credentials_secret_arn" {
+  description = "Pre-existing Secrets Manager secret ARN holding Shopify JSON client_id and client_secret fields."
   type        = string
   default     = ""
 }

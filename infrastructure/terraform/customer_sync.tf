@@ -1,8 +1,8 @@
 # On-demand only: no ECS service, scheduler or Shopify customer writes on apply.
-# Supply an immutable pushed image and pre-existing Shopify token secret ARN
+# Supply an immutable pushed image and pre-existing Shopify client credentials secret ARN
 # after reviewing IAM, costs and runtime verification.
 locals {
-  enable_customer_sync = var.customer_sync_image != "" && var.shopify_admin_secret_arn != "" && var.shopify_shop_domain != ""
+  enable_customer_sync = var.customer_sync_image != "" && var.shopify_client_credentials_secret_arn != "" && var.shopify_shop_domain != ""
 }
 
 resource "aws_ecr_repository" "customer_sync" {
@@ -38,7 +38,7 @@ resource "aws_iam_role_policy" "customer_sync_execution_secrets" {
     Statement = [{
       Effect = "Allow"
       Action = ["secretsmanager:GetSecretValue"]
-      Resource = [aws_secretsmanager_secret.api_database.arn, var.shopify_admin_secret_arn]
+      Resource = [aws_secretsmanager_secret.api_database.arn, var.shopify_client_credentials_secret_arn]
     }]
   })
 }
@@ -89,7 +89,8 @@ resource "aws_ecs_task_definition" "customer_sync" {
     secrets = [
       { name = "DB_USER", valueFrom = "${aws_secretsmanager_secret.api_database.arn}:username::" },
       { name = "DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.api_database.arn}:password::" },
-      { name = "SHOPIFY_ADMIN_TOKEN", valueFrom = var.shopify_admin_secret_arn }
+      { name = "SHOPIFY_CLIENT_ID", valueFrom = "${var.shopify_client_credentials_secret_arn}:client_id::" },
+      { name = "SHOPIFY_CLIENT_SECRET", valueFrom = "${var.shopify_client_credentials_secret_arn}:client_secret::" }
     ]
     command = ["--bucket", aws_s3_bucket.landing.bucket, "--limit", "5"]
     logConfiguration = {
