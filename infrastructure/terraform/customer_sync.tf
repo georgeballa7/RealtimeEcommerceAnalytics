@@ -60,7 +60,11 @@ resource "aws_iam_role_policy" "customer_sync_silver" {
       { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.landing.arn,
         Condition = { StringLike = { "s3:prefix" = ["historical/online_retail_ii/silver/v1/*"] } } },
       { Effect = "Allow", Action = ["s3:GetObject"],
-        Resource = "${aws_s3_bucket.landing.arn}/historical/online_retail_ii/silver/v1/*" }
+        Resource = [
+          "${aws_s3_bucket.landing.arn}/historical/online_retail_ii/silver/v1/*",
+          # Silver manifest lineage verification reads this one Bronze manifest.
+          "${aws_s3_bucket.landing.arn}/historical/online_retail_ii/bronze/v1/manifest.json"
+        ] }
     ]
   })
 }
