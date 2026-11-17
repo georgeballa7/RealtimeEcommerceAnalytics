@@ -4,7 +4,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from ecommerce.application.use_cases.shopify_customer_sync import synchronize_customers
+from ecommerce.application.use_cases.shopify_customer_sync import customer_batches, synchronize_customers
 from ecommerce.infrastructure.postgres.customer_identity import HistoricalCustomer
 from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyError, ShopifyGraphQLClient
 
@@ -98,3 +98,54 @@ def test_unsafe_graphql_mutation_transport_error_is_not_retried():
 def test_invalid_domain_rejected():
     with pytest.raises(ValueError):
         ShopifyConfig("evil.example.net", "secret")
+
+
+def test_customer_batches_preserves_order_and_size():
+    """Every customer is visited once; the last batch may be smaller."""
+    customers = [HistoricalCustomer(str(uuid4()), str(i)) for i in range(205)]
+    batches = list(customer_batches(iter(customers), 100))
+    assert list(map(len, batches)) == [100, 100, 5]
+    assert [customer for batch in batches for customer in batch] == customers
+
+
+def test_customer_batches_rejects_invalid_sizes():
+    customer = HistoricalCustomer(str(uuid4()), "1")
+    for size in (0, -1, 1001):
+        with pytest.raises(ValueError):
+            list(customer_batches([customer], size))
+
+
+def test_resume_after_partial_batch_failure_does_not_repeat_writes():
+    """A failed run can restart from the beginning without another mutation."""
+    class FailingOnceAPI(FakeAPI):
+        def __init__(self):
+            super().__init__()
+            self.failed = False
+
+        def lookup_customer(self, key):
+            if not self.failed and len(self.items) == 3 and key not in self.items:
+                self.failed = True
+                raise RuntimeError("transient error")
+            return super().lookup_customer(key)
+
+    api, repo = FailingOnceAPI(), FakeRepo()
+    # FakeRepo enforces unique Shopify GIDs; assign a fresh ID per customer.
+    def upsert(key):
+        api.writes += 1
+        api.items[key] = f"gid://shopify/Customer/{api.writes}"
+        return api.items[key]
+    api.upsert_customer = upsert
+    customers = [HistoricalCustomer(str(uuid4()), str(i)) for i in range(7)]
+
+    with pytest.raises(RuntimeError):
+        for batch in customer_batches(customers, 5):
+            synchronize_customers(batch, api, repo, allow_write=True)
+
+    assert api.writes == 3
+    assert len(repo.items) == 3
+
+    for batch in customer_batches(customers, 5):
+        synchronize_customers(batch, api, repo, allow_write=True)
+
+    assert api.writes == 7
+    assert len(repo.items) == 7
