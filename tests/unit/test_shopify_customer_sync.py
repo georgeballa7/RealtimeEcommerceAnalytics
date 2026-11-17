@@ -4,9 +4,16 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from ecommerce.application.use_cases.shopify_customer_sync import customer_batches, synchronize_customers
+from ecommerce.application.use_cases.shopify_customer_sync import (
+    customer_batches,
+    synchronize_customers,
+)
 from ecommerce.infrastructure.postgres.customer_identity import HistoricalCustomer
-from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyError, ShopifyGraphQLClient
+from ecommerce.infrastructure.shopify.client import (
+    ShopifyConfig,
+    ShopifyError,
+    ShopifyGraphQLClient,
+)
 
 
 class FakeAPI:
