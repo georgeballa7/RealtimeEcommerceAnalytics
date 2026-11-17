@@ -1,18 +1,31 @@
-# Shopify Customer Sync — Review Package
+# Shopify Customer Identity Synchronization — Implementation Status
 
-**Scope:** review proposal only. No GitHub commit, database migration, Shopify write, or S3 change has been performed.
+**Committed foundation:** [26467dd](https://github.com/georgeballa7/RealtimeEcommerceAnalytics/commit/26467ddcfb86dbbdd87f672eab5353033a8b6f55) on `feature/historical-data-foundation`. This includes the Shopify GraphQL client, customer identity SQL, PostgreSQL mapping repository, guarded small-batch sync use case and seven offline unit tests. This document records the implementation state; it is not an uncommitted proposal.
 
-Files are relative to repository root. Install `python -m pip install -e '.[shopify,postgres,historical,aws,dev]'` then run `python -m pytest tests/unit/test_shopify_customer_sync.py -q`.
+**Verified externally on 17 November 2026:** The installed Shopify development-store app authenticated through the Admin GraphQL API; shop identity, the CUSTOMER metafield definition of type `id` at `custom.ecommerce_canonical_customer_id`, and granted `read_customers` / `write_customers` scopes passed a read-only Python check. No Shopify customer creation was performed during that verification.
 
-Before any live writes:
-1. Install/configure the Shopify app with `read_customers` and `write_customers` scopes and protected customer data access as applicable.
-2. Create a Shopify CUSTOMER metafield definition of type `id`: namespace `custom`, key `ecommerce_canonical_customer_id` (configured once, not via this script).
-3. Apply `infrastructure/sql/001_shopify_customer_identity.sql` with an authorized migration role to the operational database. Use a least-privilege application role with TLS verification.
-4. Export environment variables `SHOPIFY_SHOP_DOMAIN`, `SHOPIFY_ADMIN_TOKEN`, `ECOMMERCE_DATABASE_URL`; never paste them into the chat or Git.
-5. First run without `--allow-customer-writes`: the script reads checksum-verified Silver from S3, verifies shop and metafield definition, and only does remote custom-ID lookups. It writes no customer records.
-6. After reviewing read-only output, run a controlled test with `--allow-customer-writes --limit 1` (max 5 per invocation); investigate success and retry behavior before broader rollout.
-7. Full population reconciliation (5,942 IDs) requires a separately reviewed bulk runner with progress reporting; this package intentionally cannot bulk-create customers.
+**Not yet executed or verified:** The SQL migration has not been verified as applied to RDS. An AWS customer-sync ECS/Fargate task is not deployed. No live customer write, complete 5,942-customer reconciliation or bulk import has been performed. The existing SQL has uniqueness safeguards but no durable per-attempt ledger; the existing script is limited to five writes per invocation.
 
-**Important:** `customerSet` receives `input: {}` because historical UCI data does not contain genuine customer names/emails. This is a documented API schema shape, but its acceptance for customer creation must be verified against the development store on a single explicitly approved test identity. Do **not** invent email addresses or imply any user consent.
+## AWS-only deployment plan
 
-The submitted SQL defines mapping uniqueness. It does not yet contain a durable per-attempt retry ledger, which is a subsequent operational hardening step. A failure between Shopify creation and the DB insert is recovered by lookup-by-custom-ID on restart.
+AWS `eu-central-1` is the sole application runtime. Shopify is the external development-store source. Private RDS PostgreSQL stores verified customer mappings and future durable sync state; S3 holds immutable historical Silver v1. The worker will run as an on-demand ECS/Fargate task in the existing VPC, using least-privilege IAM, Secrets Manager, verified RDS TLS and CloudWatch logs. Developer machines may run unit tests and CLI tooling, but are not a second operational deployment.
+
+1. Add versioned, transaction-safe RDS migration execution, create a least-privilege application role and configure AWS credential injection; deploy only after review.
+2. Add a durable customer-attempt ledger, bounded backoff, recovery and reconciliation for ambiguous Shopify outcomes, and a resumable bulk runner with progress and final-count reporting.
+3. Package and deploy the customer-sync task using the existing private network; validate configuration, health/logging and failure handling without making the database public.
+4. Execute a read-only synchronization verification against checksum-verified Silver v1 before authorizing Shopify writes.
+5. Explicitly approve one Shopify customer create/find/retry integration test; verify whether `customerSet(identifier: ..., input: {})` is accepted for an ID-only historical customer. Never invent email addresses or consent.
+6. Only after the integration tests pass, run bounded synchronization for all 5,942 canonical Silver customers and reconcile persisted Shopify-returned GIDs with zero mapping conflicts.
+
+## Existing developer checks
+
+From the repository root:
+
+```powershell
+python -m pip install -e ".[shopify,postgres,historical,aws,dev]"
+python -m pytest tests/unit/test_shopify_customer_sync.py -q
+```
+
+The current `scripts/sync_historical_customers.py` entrypoint is read-only by default and permits at most five writes when explicitly enabled. It expects `SHOPIFY_SHOP_DOMAIN`, `SHOPIFY_ADMIN_TOKEN` and `ECOMMERCE_DATABASE_URL`, and a reachable PostgreSQL database. Do not run it as a local-to-private-RDS connection workflow; it needs AWS task packaging and a deployed schema first. Never store or publish credentials in GitHub or logs.
+
+**Safety boundary:** PostgreSQL transactions cannot atomically commit a remote Shopify operation. Durable attempt tracking plus read-back reconciliation is required to make retries safe across that boundary. Silver v1 remains immutable.
