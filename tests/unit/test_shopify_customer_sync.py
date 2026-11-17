@@ -244,6 +244,6 @@ def test_customer_set_rejects_invalid_source_id_before_mutation():
     with (
         httpx.Client(transport=httpx.MockTransport(unexpected)) as http,
         ShopifyGraphQLClient(cfg, client=http) as api,
+        pytest.raises(ValueError, match="numeric historical source"),
     ):
-        with pytest.raises(ValueError, match="numeric historical source"):
-            api.upsert_customer(str(uuid4()), "not-an-id")
+        api.upsert_customer(str(uuid4()), "not-an-id")
