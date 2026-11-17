@@ -156,3 +156,55 @@ def test_resume_after_partial_batch_failure_does_not_repeat_writes():
 
     assert api.writes == 7
     assert len(repo.items) == 7
+
+
+def test_shopify_validation_errors_include_safe_codes_and_fields_only():
+    """Structured diagnostics are actionable without exposing error messages."""
+    uid = str(uuid4())
+    def respond(request):
+        import json
+        payload = json.loads(request.content)
+        assert payload["variables"]["input"] == {}
+        return httpx.Response(200, json={"data": {"customerSet": {
+            "customer": None,
+            "userErrors": [
+                {"code": "MISSING_FIELD_REQUIRED", "field": ["input", "email"],
+                 "message": "Private customer@example.com"},
+                {"code": "INPUT_MISMATCH", "field": ["identifier", "customId"],
+                 "message": "Secret identifier value"},
+            ],
+        }}})
+    cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        with ShopifyGraphQLClient(cfg, client=http) as api:
+            with pytest.raises(ShopifyError) as err:
+                api.upsert_customer(uid)
+    msg = str(err.value)
+    assert "MISSING_FIELD_REQUIRED@input.email" in msg
+    assert "INPUT_MISMATCH@identifier.customId" in msg
+    assert "customer@example.com" not in msg
+    assert "Secret identifier value" not in msg
+    assert uid not in msg
+
+
+def test_shopify_validation_diagnostics_reject_unsafe_fields_and_codes():
+    """Unexpected metadata cannot bypass the redaction policy."""
+    def respond(_request):
+        return httpx.Response(200, json={"data": {"customerSet": {
+            "customer": None,
+            "userErrors": [
+                {"code": "INVALID: private@example.com",
+                 "field": ["input", "private@example.com"],
+                 "message": "Do not log this value"},
+                {"code": None, "field": "not a list",
+                 "message": "Private value"},
+            ],
+        }}})
+    cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        with ShopifyGraphQLClient(cfg, client=http) as api:
+            with pytest.raises(ShopifyError) as err:
+                api.upsert_customer(str(uuid4()))
+    assert "Shopify customerSet validation errors: UNKNOWN@input, UNKNOWN@unspecified" == str(err.value)
+    assert "private@example.com" not in str(err.value)
+    assert "Do not log" not in str(err.value)
