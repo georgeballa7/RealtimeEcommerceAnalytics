@@ -3,7 +3,10 @@ import httpx
 import pytest
 
 from ecommerce.infrastructure.shopify.client import (
-    ShopifyClientCredentials, ShopifyConfig, ShopifyGraphQLClient, ShopifyError,
+    ShopifyClientCredentials,
+    ShopifyConfig,
+    ShopifyError,
+    ShopifyGraphQLClient,
 )
 
 
@@ -68,8 +71,10 @@ def test_mutation_401_never_replayed():
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
         provider = ShopifyClientCredentials("demo.myshopify.com", "id", "secret", client=http)
-        with ShopifyGraphQLClient(ShopifyConfig("demo.myshopify.com"),
-                                  client=http, token_provider=provider) as api:
-            with pytest.raises(ShopifyError, match="authentication rejected"):
-                api.query("mutation { test }", mutation=True)
+        with (
+            ShopifyGraphQLClient(ShopifyConfig("demo.myshopify.com"),
+                                 client=http, token_provider=provider) as api,
+            pytest.raises(ShopifyError, match="authentication rejected"),
+        ):
+            api.query("mutation { test }", mutation=True)
         assert len(writes) == 1
