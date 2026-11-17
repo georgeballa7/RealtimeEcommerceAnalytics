@@ -5,6 +5,7 @@ retries following an ambiguous Shopify response or interrupted database commit.
 """
 from __future__ import annotations
 from contextlib import nullcontext
+from itertools import islice
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 from uuid import UUID
@@ -95,3 +96,17 @@ def synchronize_customers(customers: Iterable[HistoricalCustomer], api: Customer
                        else "SYNC_FAILED")
                 raise
     return SyncSummary(processed, skipped, verified, failed)
+
+
+def customer_batches(customers: Iterable[HistoricalCustomer], batch_size: int):
+    """Yield bounded, ordered customer batches without altering checkpoint semantics.
+
+    Frequency: called within each explicitly authorized synchronization run.
+    Each customer is still reconciled and persisted individually by
+    synchronize_customers; a batch is only a progress/reporting boundary.
+    """
+    if not 1 <= batch_size <= 1000:
+        raise ValueError("batch_size must be between 1 and 1000")
+    iterator = iter(customers)
+    while batch := tuple(islice(iterator, batch_size)):
+        yield batch
