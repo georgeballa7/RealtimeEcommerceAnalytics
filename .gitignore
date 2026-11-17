@@ -221,3 +221,6 @@ __marimo__/
 
 # Original historical datasets must remain outside Git.
 data/raw/
+
+# Keep all generated historical exports and manifests local.
+data/bronze/
