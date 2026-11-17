@@ -5,20 +5,28 @@ must have only required table permissions. No token is written to disk.
 """
 from __future__ import annotations
 
-from uuid import UUID
 import argparse
 import os
+from uuid import UUID
 
 import boto3
 import psycopg
 from psycopg.conninfo import make_conninfo
 
-from ecommerce.application.use_cases.shopify_customer_sync import customer_batches, synchronize_customers
-from ecommerce.infrastructure.postgres.customer_sync_ledger import PostgresCustomerSyncLedger
-from ecommerce.infrastructure.postgres.customer_identity import (
-    HistoricalCustomer, PostgresCustomerIdentityRepository,
+from ecommerce.application.use_cases.shopify_customer_sync import (
+    customer_batches,
+    synchronize_customers,
 )
-from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyGraphQLClient, ShopifyClientCredentials
+from ecommerce.infrastructure.postgres.customer_identity import (
+    HistoricalCustomer,
+    PostgresCustomerIdentityRepository,
+)
+from ecommerce.infrastructure.postgres.customer_sync_ledger import PostgresCustomerSyncLedger
+from ecommerce.infrastructure.shopify.client import (
+    ShopifyClientCredentials,
+    ShopifyConfig,
+    ShopifyGraphQLClient,
+)
 from ecommerce.pipelines.silver.audit import read_published_silver
 
 
