@@ -136,3 +136,55 @@ def test_reject_population_mismatch():
             [1, 2], source_population=1, options=CustomerRunOptions(),
             api=API(), repository=Repository(), ledger=None,
         )
+
+
+def test_missing_source_id_rejected_before_any_remote_calls():
+    frame = source(2)
+    frame.loc[0, "source_customer_id"] = None
+    with pytest.raises(ValueError, match="null"):
+        select_silver_customers(frame, CustomerRunOptions(limit=2))
+
+
+def test_duplicate_source_id_rejected():
+    frame = source(2)
+    frame.loc[1, "source_customer_id"] = frame.loc[0, "source_customer_id"]
+    with pytest.raises(ValueError, match="Duplicate historical"):
+        select_silver_customers(frame, CustomerRunOptions(limit=2))
+
+
+def test_invalid_uuid_rejected_with_controlled_error():
+    frame = source(2)
+    frame.loc[1, "customer_id"] = "not-a-uuid"
+    with pytest.raises(ValueError, match="Invalid Silver"):
+        select_silver_customers(frame, CustomerRunOptions(limit=2))
+
+
+def test_invalid_historical_source_id_rejected():
+    frame = source(2)
+    frame.loc[0, "source_customer_id"] = "17850.0"
+    with pytest.raises(ValueError, match="Invalid Silver"):
+        select_silver_customers(frame, CustomerRunOptions(limit=2))
+
+
+def test_structured_report_is_valid_json_without_customer_data():
+    import json
+
+    options = CustomerRunOptions(limit=2, batch_size=1, allow_write=True)
+    selected = select_silver_customers(source(2), options)
+    lines = []
+    report = run_customer_sync(
+        selected, source_population=2, options=options,
+        api=API(), repository=Repository(), ledger=None, emit=lines.append,
+    )
+    data = json.loads(report.to_json())
+    assert data["selected"] == 2
+    assert data["processed"] == 2
+    assert data["verified_new"] == 2
+    assert data["verified_in_database"] == 2
+    assert data["mode"] == "WRITE"
+    assert data["run_id"]
+    assert data["started_at_utc"]
+    assert data["completed_at_utc"]
+    assert lines[-1] == "CustomerSyncReport: " + report.to_json()
+    assert "17850" not in report.to_json()
+    assert "gid://shopify/Customer" not in report.to_json()
