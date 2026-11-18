@@ -61,7 +61,9 @@ def main() -> None:
         p.error("Missing environment settings: " + ", ".join(missing))
     if not os.path.isfile(os.environ["DB_SSLROOTCERT"]):
         p.error("DB_SSLROOTCERT must reference a readable CA bundle")
-    if args.allow_catalog_writes and (not args.approval_key or not args.approval_sha256):
+    if bool(args.approval_key) != bool(args.approval_sha256):
+        p.error("Approval key and SHA-256 must be provided together")
+    if args.allow_catalog_writes and not args.approval_key:
         p.error("Catalog writes require both --approval-key and --approval-sha256")
 
     session = boto3.Session(profile_name=args.aws_profile, region_name=args.aws_region)
@@ -70,7 +72,7 @@ def main() -> None:
     selection = select_catalog_candidates(tables["products"], tables["product_variants"])
     approved = (
         approved_catalog(s3, args.bucket, args.approval_key, args.approval_sha256)
-        if args.allow_catalog_writes else None
+        if args.approval_key else None
     )
     candidates = selected_catalog(
         selection.candidates,
@@ -88,6 +90,8 @@ def main() -> None:
                 "excluded_by_class": selection.excluded_by_class,
                 "selected": len(candidates),
                 "write_authorized": args.allow_catalog_writes,
+                "allowlist_verified": approved is not None,
+                "allowlist_population": len(approved) if approved is not None else None,
             },
             sort_keys=True,
         ),
