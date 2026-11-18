@@ -140,8 +140,11 @@ def reconcile(s3: Any, bucket: str, *, prefix: str = DEFAULT_SYNTHETIC_PREFIX) -
                     "Incorrect order provenance")
             require(order["currency"] == "GBP" and bool(order["customer_id"]),
                     "Invalid order currency or customer identity")
-            require(order["currency_assumption"] == "GBP_assumed_from_UK_source_not_verified",
-                    "Missing GBP assumption on order")
+            # Published v2 stores its GBP assumption on items; older order/event
+            # records may not repeat the metadata. Reject conflicting values.
+            require(order.get("currency_assumption", "GBP_assumed_from_UK_source_not_verified")
+                    == "GBP_assumed_from_UK_source_not_verified",
+                    "Conflicting GBP assumption on order")
             all_orders[oid] = order
             totals["gross_gbp"] += money(order["order_total"])
 
@@ -186,8 +189,9 @@ def reconcile(s3: Any, bucket: str, *, prefix: str = DEFAULT_SYNTHETIC_PREFIX) -
                     "Cancellation product mismatch")
             require(event["currency"] == "GBP" and event["synthetic"] is True,
                     "Incorrect cancellation provenance")
-            require(event["currency_assumption"] == "GBP_assumed_from_UK_source_not_verified",
-                    "Missing GBP assumption on cancellation")
+            require(event.get("currency_assumption", "GBP_assumed_from_UK_source_not_verified")
+                    == "GBP_assumed_from_UK_source_not_verified",
+                    "Conflicting GBP assumption on cancellation")
             require(event["event_type"] == "order_item_cancelled"
                     and event["provenance"] == "simulated_cancellation_not_verified_refund",
                     "Unexpected cancellation semantics")
