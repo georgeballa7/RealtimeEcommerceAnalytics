@@ -10,7 +10,7 @@ Examples:
 [CmdletBinding()]
 param(
     [string]$ConfigPath = 'config/aws-demo.json',
-    [string]$TaskDefinition = 'ecommerce-customer-sync-demo:4',
+    [string]$TaskDefinition = 'ecommerce-customer-sync-demo',
     [ValidateRange(0, 10000000)][int]$Limit = 5,
     [ValidateRange(1, 1000)][int]$BatchSize = 100,
     [switch]$Execute,
@@ -85,10 +85,17 @@ try {
         Write-Host 'Check ECS console/CloudWatch for final summary and exit code.'
         return
     }
-    & aws ecs wait tasks-stopped --cluster "$($config.cluster)" --tasks $taskArn @common
-    if ($LASTEXITCODE -ne 0) { throw "Wait timed out. Inspect task $taskArn; do not relaunch." }
-    $taskResult = Invoke-AwsJson (@('ecs','describe-tasks','--cluster',"$($config.cluster)",'--tasks',$taskArn) + $common)
-    $task = $taskResult.tasks[0]
+    # Custom polling supports long imports; the AWS CLI ECS waiter times out early.
+    $deadline = (Get-Date).AddHours(3)
+    do {
+        $taskResult = Invoke-AwsJson (@('ecs','describe-tasks','--cluster',"$($config.cluster)",'--tasks',$taskArn) + $common)
+        $task = $taskResult.tasks[0]
+        if ($task.lastStatus -eq 'STOPPED') { break }
+        if ((Get-Date) -ge $deadline) {
+            throw "Task still running after three hours. Inspect $taskArn; do not relaunch."
+        }
+        Start-Sleep -Seconds 30
+    } while ($true)
     $container = @($task.containers | Where-Object { $_.name -eq "$($work.container)" })
     if ($container.Count -ne 1 -or $null -eq $container[0].exitCode) { throw "No container exit code. Inspect $taskArn" }
     Write-Host "Task: $($task.lastStatus); exit code: $($container[0].exitCode)"
