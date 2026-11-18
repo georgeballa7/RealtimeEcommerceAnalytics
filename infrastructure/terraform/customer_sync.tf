@@ -30,7 +30,7 @@ resource "aws_iam_role_policy_attachment" "customer_sync_execution" {
 }
 
 resource "aws_iam_role_policy" "customer_sync_execution_secrets" {
-  count = local.enable_customer_sync ? 1 : 0
+  count = local.enable_customer_sync || local.enable_catalog_sync ? 1 : 0
   name  = "read-sync-secrets"
   role  = aws_iam_role.customer_sync_execution.id
   policy = jsonencode({
