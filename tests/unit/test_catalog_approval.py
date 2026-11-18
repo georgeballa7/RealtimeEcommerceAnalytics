@@ -79,3 +79,20 @@ def test_invalid_approval_prefix_and_duplicates():
         approved_catalog(s3, "test-bucket", "unreviewed.json", digest)
     with pytest.raises(ValueError, match="Duplicate"):
         approved_catalog(s3, "test-bucket", KEY, digest)
+
+
+def test_read_only_uses_pinned_approval_allowlist():
+    candidates = [candidate("85123A"), candidate("85123B"), candidate("85123C")]
+    selected = selected_catalog(
+        candidates, limit=5, allow_write=False,
+        approved=frozenset({"85123C", "85123A"}),
+    )
+    assert [x.source_stock_code for x in selected] == ["85123A", "85123C"]
+
+
+def test_read_only_rejects_unknown_approved_codes():
+    with pytest.raises(ValueError, match="unknown or ineligible"):
+        selected_catalog(
+            [candidate("85123A")], limit=5, allow_write=False,
+            approved=frozenset({"NOT_PRESENT"}),
+        )
