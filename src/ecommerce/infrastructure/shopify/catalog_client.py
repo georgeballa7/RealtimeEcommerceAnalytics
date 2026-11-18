@@ -35,10 +35,11 @@ PRODUCT_VARIANTS = """query ProductDefaultVariant($id: ID!) {
     variants(first: 3) { nodes { id sku title } }
   }
 }"""
-VARIANT_SET = """mutation UpdateHistoricalDefaultVariant(
-  $identifier: ProductSetIdentifiers, $input: ProductSetInput!) {
-  productSet(identifier: $identifier, input: $input, synchronous: true) {
-    product { id variants(first: 3) { nodes { id sku } } }
+VARIANT_UPDATE = """mutation UpdateHistoricalDefaultVariant(
+  $productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+  productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    product { id }
+    productVariants { id sku }
     userErrors { code field }
   }
 }"""
@@ -159,20 +160,21 @@ class ShopifyCatalogClient:
         if variants[0].get("title") != "Default Title":
             raise ShopifyError("Unexpected default Shopify variant title")
         result = self.graphql.query(
-            VARIANT_SET,
+            VARIANT_UPDATE,
             {
-                "identifier": {"id": product_gid},
-                "input": {
-                    "variants": [{"id": variants[0]["id"], "sku": candidate.sku}],
-                },
+                "productId": product_gid,
+                "variants": [{
+                    "id": variants[0]["id"],
+                    "inventoryItem": {"sku": candidate.sku},
+                }],
             },
             mutation=True,
-        ).get("productSet") or {}
-        _raise_user_errors(result, "productSet variant update")
+        ).get("productVariantsBulkUpdate") or {}
+        _raise_user_errors(result, "productVariantsBulkUpdate")
         product = result.get("product") or {}
         if product.get("id") != product_gid:
             raise ShopifyError("Variant update returned wrong product")
-        nodes = ((product.get("variants") or {}).get("nodes") or [])
+        nodes = result.get("productVariants") or []
         if len(nodes) != 1 or nodes[0].get("sku") != candidate.sku:
             raise ShopifyError("Variant update returned unexpected payload")
         if nodes[0].get("id") != variants[0]["id"]:
