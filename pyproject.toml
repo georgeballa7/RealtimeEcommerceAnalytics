@@ -17,6 +17,7 @@ postgres = ["psycopg[binary]>=3.2"]
 aws = ["boto3>=1.35"]
 spark = ["pyspark>=3.5"]
 historical = ["pandas>=2.2", "openpyxl>=3.1", "pyarrow>=15"]
+notebook = ["ipykernel>=6.29", "matplotlib>=3.8", "ipython>=8.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
