@@ -66,6 +66,17 @@ variable "db_master_username" {
   default     = "ecommerce_admin"
 }
 
+variable "nat_gateway_count" {
+  description = "Number of zonal NAT Gateways. One shared gateway minimizes dev cost; two provides per-AZ egress resiliency."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([1, 2], var.nat_gateway_count)
+    error_message = "Choose 1 (development) or 2 (per-AZ resilience)."
+  }
+}
+
 variable "public_subnet_cidrs" {
   type = list(string)
   default = ["10.20.0.0/24", "10.20.1.0/24"]
