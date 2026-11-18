@@ -64,6 +64,7 @@ def publish(s3, start, end, orders=None, items=None):
         cutoff_utc=end,
         orders=orders or [],
         items=items or [],
+        cancellations=[],
         policy_sha256=SHA,
         calibration_sha256=SHA,
         source_bronze_sha256=SHA,
@@ -93,10 +94,11 @@ def test_failed_checkpoint_leaves_only_uncommitted_staged_objects():
         publish(s3, ORIGIN, ORIGIN + timedelta(hours=2))
     assert f"{DEFAULT_SYNTHETIC_PREFIX}/state/head.json" not in s3.objects
     staged = len(s3.objects)
-    assert staged == 3
+    assert staged == 4
     manifest = publish(s3, ORIGIN, ORIGIN + timedelta(hours=2))
-    assert len(s3.objects) == 4
+    assert len(s3.objects) == 5
     assert manifest["files"]["orders"]["rows"] == 0
+    assert manifest["files"]["cancellations"]["rows"] == 0
 
 
 def test_order_ids_and_interval_bounds_checked_before_writes():
