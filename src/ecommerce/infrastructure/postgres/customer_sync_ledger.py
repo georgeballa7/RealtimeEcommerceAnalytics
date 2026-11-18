@@ -41,30 +41,28 @@ class PostgresCustomerSyncLedger:
         """A fresh UUID token prevents releasing another worker's reclaimed lease."""
         UUID(customer_id)
         token = str(uuid4())
-        with self.connection.transaction():
-            with self.connection.cursor() as cur:
-                cur.execute("""INSERT INTO shopify_customer_sync_lease
-                    (shop_gid, customer_id, lease_token, lease_expires_at)
-                    VALUES (%s, %s, %s, now() + (%s * interval '1 second'))
-                    ON CONFLICT (shop_gid, customer_id) DO UPDATE SET
-                        lease_token = EXCLUDED.lease_token,
-                        lease_expires_at = EXCLUDED.lease_expires_at,
-                        updated_at = now()
-                    WHERE shopify_customer_sync_lease.lease_expires_at <= now()
-                    RETURNING lease_token""",
-                    (self.shop_gid, customer_id, token, self.lease_seconds))
-                if cur.fetchone() is None:
-                    raise CustomerLeaseBusy("Customer sync lease already owned")
+        with self.connection.transaction(), self.connection.cursor() as cur:
+            cur.execute("""INSERT INTO shopify_customer_sync_lease
+                (shop_gid, customer_id, lease_token, lease_expires_at)
+                VALUES (%s, %s, %s, now() + (%s * interval '1 second'))
+                ON CONFLICT (shop_gid, customer_id) DO UPDATE SET
+                    lease_token = EXCLUDED.lease_token,
+                    lease_expires_at = EXCLUDED.lease_expires_at,
+                    updated_at = now()
+                WHERE shopify_customer_sync_lease.lease_expires_at <= now()
+                RETURNING lease_token""",
+                (self.shop_gid, customer_id, token, self.lease_seconds))
+            if cur.fetchone() is None:
+                raise CustomerLeaseBusy("Customer sync lease already owned")
         context_token = self._active_token.set((customer_id, token))
         try:
             yield
         finally:
             self._active_token.reset(context_token)
-            with self.connection.transaction():
-                with self.connection.cursor() as cur:
-                    cur.execute("""DELETE FROM shopify_customer_sync_lease
-                        WHERE shop_gid = %s AND customer_id = %s AND lease_token = %s""",
-                        (self.shop_gid, customer_id, token))
+            with self.connection.transaction(), self.connection.cursor() as cur:
+                cur.execute("""DELETE FROM shopify_customer_sync_lease
+                    WHERE shop_gid = %s AND customer_id = %s AND lease_token = %s""",
+                    (self.shop_gid, customer_id, token))
 
     def record(self, customer_id: str, event: AttemptEvent) -> None:
         """Append one event; require a currently owned lease to serialize sequence."""
@@ -80,20 +78,19 @@ class PostgresCustomerSyncLedger:
                 1 <= len(event.failure_code) <= 48 and
                 all(c.isupper() or c.isdigit() or c == '_' for c in event.failure_code)):
             raise ValueError("Expected a sanitized uppercase failure code")
-        with self.connection.transaction():
-            with self.connection.cursor() as cur:
-                cur.execute("""SELECT 1 FROM shopify_customer_sync_lease
-                    WHERE shop_gid=%s AND customer_id=%s AND lease_token=%s
-                      AND lease_expires_at > now() FOR UPDATE""",
-                    (self.shop_gid, customer_id, active[1]))
-                if cur.fetchone() is None:
-                    raise CustomerLeaseBusy("Customer lease expired or absent")
-                cur.execute("""INSERT INTO shopify_customer_sync_attempt
-                    (shop_gid, customer_id, attempt_number, phase, outcome,
-                     shopify_customer_gid, failure_code)
-                    SELECT %s, %s, COALESCE(MAX(attempt_number), 0) + 1,
-                           %s, %s, %s, %s
-                    FROM shopify_customer_sync_attempt
-                    WHERE shop_gid=%s AND customer_id=%s""",
-                    (self.shop_gid, customer_id, event.phase, event.outcome,
-                     event.shopify_gid, event.failure_code, self.shop_gid, customer_id))
+        with self.connection.transaction(), self.connection.cursor() as cur:
+            cur.execute("""SELECT 1 FROM shopify_customer_sync_lease
+                WHERE shop_gid=%s AND customer_id=%s AND lease_token=%s
+                  AND lease_expires_at > now() FOR UPDATE""",
+                (self.shop_gid, customer_id, active[1]))
+            if cur.fetchone() is None:
+                raise CustomerLeaseBusy("Customer lease expired or absent")
+            cur.execute("""INSERT INTO shopify_customer_sync_attempt
+                (shop_gid, customer_id, attempt_number, phase, outcome,
+                 shopify_customer_gid, failure_code)
+                SELECT %s, %s, COALESCE(MAX(attempt_number), 0) + 1,
+                       %s, %s, %s, %s
+                FROM shopify_customer_sync_attempt
+                WHERE shop_gid=%s AND customer_id=%s""",
+                (self.shop_gid, customer_id, event.phase, event.outcome,
+                 event.shopify_gid, event.failure_code, self.shop_gid, customer_id))
