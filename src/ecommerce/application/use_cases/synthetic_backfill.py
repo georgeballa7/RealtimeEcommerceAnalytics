@@ -12,7 +12,7 @@ import math
 import random
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, time, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import pandas as pd
 
@@ -20,7 +20,7 @@ from ecommerce.domain.identifiers import canonical_id
 
 SYNTHETIC_SOURCE = "synthetic_2026"
 START_UTC = datetime(2026, 1, 1, tzinfo=UTC)
-PRICE_TIERS_EUR = ("4.99", "9.99", "19.99", "39.99")
+PENNY = Decimal("0.01")
 
 
 @dataclass(frozen=True)
@@ -37,8 +37,8 @@ class SimulationPolicy:
     weekday_uniform_smoothing_percent: int = 25
     cancellation_probability_percent: int = 10
     cancellation_delay_max_days: int = 14
-    currency: str = "EUR"
-    version: str = "synthetic-2026-policy-v1"
+    currency: str = "GBP"
+    version: str = "synthetic-2026-policy-v2"
 
     def __post_init__(self) -> None:
         if (
@@ -57,8 +57,8 @@ class SimulationPolicy:
             or not 0 <= self.cancellation_probability_percent <= 100
             or not isinstance(self.cancellation_delay_max_days, int)
             or not 1 <= self.cancellation_delay_max_days <= 90
-            or self.currency != "EUR"
-            or self.version != "synthetic-2026-policy-v1"
+            or self.currency != "GBP"
+            or self.version != "synthetic-2026-policy-v2"
         ):
             raise ValueError("Invalid explicit synthetic simulation policy")
 
@@ -94,12 +94,12 @@ def _choose(rng: random.Random, values: list, weights: list[float]):
 
 def _eligible_source(
     tables: dict[str, pd.DataFrame], approved_stock_codes: frozenset[str]
-) -> tuple[list[str], list[float], list[list[tuple[str, int]]], dict[str, tuple[str, str]]]:
+) -> tuple[list[str], list[float], list[list[tuple[str, int]]], dict[str, tuple[str, str]], dict[str, str]]:
     required = {
         "customers": {"customer_id"},
         "orders": {"order_id", "customer_id"},
         "order_items": {
-            "order_id", "source_stock_code", "quantity", "is_positive_sale"
+            "order_id", "source_stock_code", "quantity", "unit_price", "is_positive_sale"
         },
         "products": {"product_id", "source_stock_code"},
         "product_variants": {"variant_id", "source_stock_code"},
@@ -124,6 +124,42 @@ def _eligible_source(
         raise ValueError("Invalid approved historical quantities")
     if not sales["quantity"].map(lambda q: float(q).is_integer()).all():
         raise ValueError("Approved quantities must be positive integers")
+
+    # Source currency is not recorded. GBP is an explicit user-approved
+    # modeling assumption for both historical reference values and 2026 sales.
+    # A per-SKU positive-price median is robust to extreme historical prices.
+    # Keep exact Decimal arithmetic; never interpret unknown source money as
+    # evidence of an observed exchange rate or inflation adjustment.
+    def positive_price(value: object) -> Decimal | None:
+        try:
+            result = Decimal(str(value))
+        except (ValueError, ArithmeticError):
+            return None
+        return result if result.is_finite() and result > 0 else None
+
+    price_samples: dict[str, list[Decimal]] = {}
+    for row in sales.itertuples(index=False):
+        price = positive_price(row.unit_price)
+        if price is not None:
+            price_samples.setdefault(str(row.source_stock_code), []).append(price)
+    if not price_samples:
+        raise ValueError("No positive historical approved merchandise prices")
+    def median(values: list[Decimal]) -> Decimal:
+        ordered = sorted(values)
+        index = len(ordered) // 2
+        return (
+            ordered[index] if len(ordered) % 2
+            else (ordered[index - 1] + ordered[index]) / 2
+        )
+    pooled_prices = [p for samples in price_samples.values() for p in samples]
+    fallback_price = median(pooled_prices).quantize(PENNY, rounding=ROUND_HALF_UP)
+    if fallback_price <= 0:
+        raise ValueError("Invalid positive fallback price after GBP rounding")
+    sku_prices = {}
+    for sku in sorted(approved_stock_codes):
+        candidate = median(price_samples[sku]) if sku in price_samples else fallback_price
+        rounded = candidate.quantize(PENNY, rounding=ROUND_HALF_UP)
+        sku_prices[sku] = str(max(rounded, PENNY))
 
     products = tables["products"].set_index("source_stock_code")
     variants = tables["product_variants"].set_index("source_stock_code")
@@ -156,7 +192,7 @@ def _eligible_source(
     if not set(counts.index).issubset(set(tables["customers"]["customer_id"])):
         raise ValueError("Approved basket references unknown customer")
     weights = [float(int(counts.get(customer, 0)) + 1) for customer in customers]
-    return customers, weights, templates, identities
+    return customers, weights, templates, identities, sku_prices
 
 
 def _seasonal_factors(calibration: dict, policy: SimulationPolicy):
@@ -218,7 +254,7 @@ def generate_interval(
         raise ValueError("Pinned historical calibration v2 is required")
     if len(approved_stock_codes) != calibration.get("eligible_stock_codes"):
         raise ValueError("Calibration/catalog population mismatch")
-    customers, customer_weights, templates, identities = _eligible_source(
+    customers, customer_weights, templates, identities, sku_prices = _eligible_source(
         tables, approved_stock_codes
     )
     weekdays, months, hours, hour_weights = _seasonal_factors(calibration, policy)
@@ -269,7 +305,7 @@ def generate_interval(
             lines = []
             for line_index, (sku, observed_units) in enumerate(chosen):
                 units = min(observed_units, max_units)
-                price = PRICE_TIERS_EUR[_seed(policy.seed, sku) % len(PRICE_TIERS_EUR)]
+                price = sku_prices[sku]
                 value = Decimal(price) * units
                 order_total += value
                 product_id, variant_id = identities[sku]
@@ -283,7 +319,7 @@ def generate_interval(
                     "source_stock_code": sku,
                     "quantity": units,
                     "unit_price": price,
-                    "line_amount": str(value.quantize(Decimal("0.01"))),
+                    "line_amount": str(value.quantize(PENNY)),
                     "currency": policy.currency,
                     "synthetic": True,
                     "source_system": SYNTHETIC_SOURCE,
@@ -300,7 +336,7 @@ def generate_interval(
                 "event_id": canonical_id("event", SYNTHETIC_SOURCE, source_order_key),
                 "event_time_utc": event.isoformat(),
                 "currency": policy.currency,
-                "order_total": str(order_total.quantize(Decimal("0.01"))),
+                "order_total": str(order_total.quantize(PENNY)),
                 "basket_mode": mode,
                 "batch_id": batch_id,
                 "policy_sha256": policy.fingerprint,
@@ -317,7 +353,7 @@ def generate_interval(
                     cancelled_line = lines[cancel_rng.randrange(len(lines))]
                     cancelled_units = 1 + cancel_rng.randrange(cancelled_line["quantity"])
                     cancellation_key = f"{source_order_key}:cancellation"
-                    cancellations_out.append({
+                    cancelled_amount = (\n                        Decimal(cancelled_line["unit_price"]) * cancelled_units\n                    ).quantize(PENNY)\n                    cancellations_out.append({
                         "event_id": canonical_id("event", SYNTHETIC_SOURCE, cancellation_key),
                         "event_type": "order_item_cancelled",
                         "order_id": order_id,
@@ -326,7 +362,7 @@ def generate_interval(
                         "product_id": cancelled_line["product_id"],
                         "variant_id": cancelled_line["variant_id"],
                         "source_stock_code": cancelled_line["source_stock_code"],
-                        "cancelled_quantity": cancelled_units,
+                        "cancelled_quantity": cancelled_units,\n                        "unit_price": cancelled_line["unit_price"],\n                        "cancelled_amount": str(cancelled_amount),\n                        "financial_semantics": "gross_sales_less_simulated_cancellations_not_refunds",
                         "event_time_utc": cancellation_time.isoformat(),
                         "original_order_time_utc": event.isoformat(),
                         "currency": policy.currency,
