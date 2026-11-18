@@ -27,20 +27,20 @@ class GraphQL:
             return {"productByIdentifier": (
                 {"id": self.product} if self.product else None
             )}
+        if "productVariantsBulkUpdate(" in document:
+            assert mutation
+            assert variables["productId"] == self.product
+            data = variables["variants"][0]
+            self.variants = [{
+                "id": data["id"], "sku": data["inventoryItem"]["sku"],
+                "title": "Default Title",
+            }]
+            return {"productVariantsBulkUpdate": {
+                "product": {"id": self.product},
+                "productVariants": self.variants,
+                "userErrors": [],
+            }}
         if "productSet(" in document:
-            if "variants" in variables["input"]:
-                assert mutation
-                data = variables["input"]["variants"][0]
-                self.variants = [{
-                    "id": data["id"], "sku": data["sku"], "title": "Default Title",
-                }]
-                return {"productSet": {
-                    "product": {
-                        "id": self.product,
-                        "variants": {"nodes": self.variants},
-                    },
-                    "userErrors": [],
-                }}
             self.product = "gid://shopify/Product/77"
             return {"productSet": {
                 "product": {"id": self.product}, "userErrors": [],
@@ -100,14 +100,19 @@ def test_existing_default_variant_is_reused_without_new_variant():
     assert client.create_variant(transport.product, c) == "gid://shopify/ProductVariant/8"
     assert client.lookup_variant(transport.product, c.sku) == "gid://shopify/ProductVariant/8"
     update_calls = [
-        x for x in transport.calls
-        if "productSet(" in x[0] and "variants" in x[1]["input"]
+        x for x in transport.calls if "productVariantsBulkUpdate(" in x[0]
     ]
     assert len(update_calls) == 1
-    assert update_calls[0][1]["identifier"] == {"id": transport.product}
-    assert update_calls[0][1]["input"]["variants"] == [
-        {"id": "gid://shopify/ProductVariant/8", "sku": "85123A"}
-    ]
+    assert update_calls[0][2] is True
+    assert update_calls[0][1] == {
+        "productId": transport.product,
+        "variants": [{
+            "id": "gid://shopify/ProductVariant/8",
+            "inventoryItem": {"sku": "85123A"},
+        }],
+    }
+    assert "price" not in str(update_calls[0][1]).lower()
+    assert "inventoryQuantities" not in str(update_calls[0][1])
 
 
 def test_existing_nondefault_variant_blocks_mutation():
