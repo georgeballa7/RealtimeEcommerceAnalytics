@@ -1,6 +1,9 @@
 import json
+
 from ecommerce.application.use_cases.outbox_publisher import (
-    ClaimedEvent, SqsOutboxPublisher, PostgresOutbox,
+    ClaimedEvent,
+    PostgresOutbox,
+    SqsOutboxPublisher,
 )
 
 
