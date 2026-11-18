@@ -62,7 +62,7 @@ if ($imageParts.Count -ne 2 -or -not $imageParts[1].StartsWith('sha256:')) {
     throw 'ECS task image must be pinned to an immutable registry digest.'
 }
 $imageHash = $imageParts[1].Substring(7)
-if ($imageHash.Length -ne 64 -or $imageHash -notmatch '^[0-9a-f]+') {
+if ($imageHash.Length -ne 64 -or $imageHash -match '[^0-9a-f]') {
     throw 'Expected a lowercase SHA-256 registry image digest.'
 }
 if ($Workload -eq 'catalog_sync' -and $AllowWrites) {
