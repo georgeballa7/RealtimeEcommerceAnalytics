@@ -53,3 +53,56 @@ def selected_catalog(
             raise ValueError("Catalog approvals reference unknown or ineligible codes")
         candidates = tuple(c for c in candidates if c.source_stock_code in approved)
     return candidates[:limit]
+
+def manifest_from_audit(report: dict) -> bytes:
+    """Build a deterministic explicit allowlist of only unflagged source SKUs.
+
+    The operator's policy approves products without detected audit flags.
+    Fail closed on missing/partial or internally inconsistent report evidence.
+    """
+    rows = report.get("review_queue")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("Missing catalog audit review queue")
+    source = report.get("source")
+    if not isinstance(source, dict) or not source.get("bronze_source_sha256"):
+        raise ValueError("Missing source lineage evidence")
+    total = report.get("source_products")
+    candidates = report.get("candidate_products")
+    exclusions = report.get("excluded_by_class")
+    if (
+        not isinstance(total, int) or not isinstance(candidates, int)
+        or not isinstance(exclusions, dict)
+        or total != candidates + sum(exclusions.values())
+        or len(rows) != candidates
+    ):
+        raise ValueError("Catalog audit population does not reconcile")
+    codes = []
+    flagged = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Malformed catalog review row")
+        code = row.get("stock_code")
+        reasons = row.get("review_reasons")
+        needs_review = row.get("needs_manual_review")
+        if not isinstance(code, str) or not code or code.strip() != code:
+            raise ValueError("Invalid catalog stock code")
+        if not isinstance(reasons, list) or not isinstance(needs_review, bool):
+            raise ValueError("Missing catalog review reasons")
+        if needs_review != bool(reasons):
+            raise ValueError("Conflicting catalog audit flags")
+        if needs_review:
+            flagged += 1
+        else:
+            codes.append(code)
+    if (
+        len(set(row["stock_code"] for row in rows)) != len(rows)
+        or flagged != report.get("manual_review_required")
+        or len(codes) != report.get("without_detected_flags")
+        or not codes
+    ):
+        raise ValueError("Catalog audit review counts do not reconcile")
+    manifest = {
+        "schema_version": "catalog-approval-v1",
+        "approved_stock_codes": sorted(codes),
+    }
+    return (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\\n").encode("utf-8")
