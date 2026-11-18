@@ -1,6 +1,4 @@
 """Representative historical Silver reconciliation and deterministic identities."""
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
