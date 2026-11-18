@@ -1,8 +1,8 @@
 """Unit tests for S3 publication without using AWS credentials or network."""
 
-from hashlib import sha256
 import io
 import json
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
