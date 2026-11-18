@@ -5,9 +5,9 @@ currency inference, synthetic event generation, or Shopify writes occur here.
 """
 from __future__ import annotations
 
+import json
 from collections import Counter
 from hashlib import sha256
-import json
 
 import pandas as pd
 
@@ -88,10 +88,10 @@ def calibrate_historical_behavior(
         "source_timestamp_semantics": "timezone_naive_no_utc_assumption",
         "currency_semantics": "unknown_source_currency_no_monetary_calibration",
         "eligible_stock_codes": len(approved_stock_codes),
-        "customers_total": int(len(customers)),
-        "orders_total": int(len(orders)),
-        "approved_positive_orders": int(len(observed)),
-        "approved_positive_lines": int(len(positive)),
+        "customers_total": len(customers),
+        "orders_total": len(orders),
+        "approved_positive_orders": len(observed),
+        "approved_positive_lines": len(positive),
         "excluded_positive_lines": int((is_sale & ~is_approved).sum()),
         "cancelled_source_lines": int(cancellations.sum()),
         "customer_order_count_histogram": {
