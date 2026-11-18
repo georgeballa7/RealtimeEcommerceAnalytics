@@ -49,13 +49,13 @@ resource "aws_route_table_association" "public" {
   subnet_id = aws_subnet.public[count.index].id
 }
 resource "aws_eip" "nat" {
-  count = 2
+  count = var.nat_gateway_count
   domain = "vpc"
   depends_on = [aws_internet_gateway.ecommerce]
   tags = { Name = "ecommerce-nat-ip-${count.index + 1}" }
 }
 resource "aws_nat_gateway" "ecommerce" {
-  count = 2
+  count = var.nat_gateway_count
   allocation_id = aws_eip.nat[count.index].id
   subnet_id = aws_subnet.public[count.index].id
   depends_on = [aws_route.public]
@@ -70,7 +70,8 @@ resource "aws_route" "application" {
   count = 2
   route_table_id = aws_route_table.application[count.index].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id = aws_nat_gateway.ecommerce[count.index].id
+  # With one NAT, both app subnets share NAT 1; with two, each AZ uses its own.
+  nat_gateway_id = aws_nat_gateway.ecommerce[var.nat_gateway_count == 1 ? 0 : count.index].id
 }
 resource "aws_route_table_association" "application" {
   count = 2
