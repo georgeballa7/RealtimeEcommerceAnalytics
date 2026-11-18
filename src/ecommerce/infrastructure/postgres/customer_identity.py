@@ -3,6 +3,7 @@
 An application PostgreSQL role, not the RDS master account, must execute this.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 
