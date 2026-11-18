@@ -7,8 +7,10 @@ records and manages progress summaries.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from uuid import UUID
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+import json
+from uuid import UUID, uuid4
 
 from ecommerce.application.use_cases.shopify_customer_sync import (
     customer_batches,
@@ -45,6 +47,14 @@ class CustomerRunReport:
     skipped_existing: int
     verified_new: int
     verified_in_database: int
+    run_id: str = ""
+    mode: str = ""
+    started_at_utc: str = ""
+    completed_at_utc: str = ""
+
+    def to_json(self) -> str:
+        """Payload-free execution evidence for CloudWatch."""
+        return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
 
 
 def select_silver_customers(frame, options: CustomerRunOptions):
@@ -60,11 +70,19 @@ def select_silver_customers(frame, options: CustomerRunOptions):
         raise ValueError("Silver customer population is empty or has null IDs")
     if frame["customer_id"].duplicated().any():
         raise ValueError("Duplicate canonical customer IDs in Silver")
+    if frame["source_customer_id"].isna().any():
+        raise ValueError("Silver customer source IDs contain null values")
+    if frame["source_customer_id"].astype(str).duplicated().any():
+        raise ValueError("Duplicate historical source customer IDs in Silver")
     records = []
     for row in frame.sort_values("customer_id").itertuples(index=False):
         customer_id = str(row.customer_id)
         source_id = str(row.source_customer_id)
-        if str(UUID(customer_id)) != customer_id or not source_id or source_id == "nan":
+        try:
+            valid_uuid = str(UUID(customer_id)) == customer_id
+        except (ValueError, TypeError, AttributeError):
+            valid_uuid = False
+        if not valid_uuid or not source_id.isdecimal():
             raise ValueError("Invalid Silver customer identity")
         records.append(HistoricalCustomer(customer_id, source_id))
     if options.start_after is not None:
@@ -86,6 +104,8 @@ def run_customer_sync(
     selected = tuple(selected)
     if source_population < len(selected):
         raise ValueError("Selected population exceeds source population")
+    run_id = str(uuid4())
+    started_at_utc = datetime.now(UTC).isoformat()
     processed = skipped = verified = 0
     emit(
         f"Mode: {'WRITE' if options.allow_write else 'READ ONLY'}; "
@@ -108,6 +128,12 @@ def run_customer_sync(
     count = repository.count_verified()
     emit(f"Summary: processed={processed}, skipped={skipped}, verified_new={verified}")
     emit(f"Verified mappings in PostgreSQL: {count}/{source_population}")
-    return CustomerRunReport(
-        source_population, len(selected), processed, skipped, verified, count
+    report = CustomerRunReport(
+        source_population, len(selected), processed, skipped, verified, count,
+        run_id=run_id,
+        mode="WRITE" if options.allow_write else "READ_ONLY",
+        started_at_utc=started_at_utc,
+        completed_at_utc=datetime.now(UTC).isoformat(),
     )
+    emit("CustomerSyncReport: " + report.to_json())
+    return report
