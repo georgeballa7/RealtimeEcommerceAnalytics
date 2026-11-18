@@ -1,12 +1,12 @@
 """Read-only historical Silver integrity and business-rule audit."""
 from __future__ import annotations
 
+import io
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-import io
-import json
 from typing import Any
 
 import pandas as pd
