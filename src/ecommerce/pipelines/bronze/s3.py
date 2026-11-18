@@ -6,16 +6,16 @@ all source and Parquet objects have passed remote SHA-256 verification.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from hashlib import sha256
 import json
-from pathlib import Path
 import re
 import subprocess
+from datetime import UTC, datetime
+from hashlib import sha256
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from ecommerce.pipelines.bronze.historical import file_sha256, ingest_historical_bronze
+from ecommerce.pipelines.bronze.historical import ingest_historical_bronze
 
 DEFAULT_PREFIX = "historical/online_retail_ii/bronze/v1"
 EXPECTED_FULL_ROWS = 1_067_371
