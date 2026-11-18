@@ -74,7 +74,7 @@ def test_repeatable_and_half_open_utc_bounds():
     assert (orders, items) == generate(start, end)
     assert len({order["order_id"] for order in orders}) == len(orders)
     assert len({line["order_item_id"] for line in items}) == len(items)
-    assert set(line["order_id"] for line in items) == {
+    assert {line["order_id"] for line in items} == {
         order["order_id"] for order in orders
     }
     assert all(start <= datetime.fromisoformat(o["event_time_utc"]) < end for o in orders)
@@ -121,7 +121,7 @@ def test_fail_closed_on_naive_cutoff_and_unapproved_catalog():
     end = start + timedelta(days=1)
     with pytest.raises(ValueError, match="UTC-aware"):
         generate(start, end.replace(tzinfo=None))
-    source, calibration, approved = fixture()
+    source, calibration, _approved = fixture()
     with pytest.raises(ValueError, match="catalog population mismatch"):
         generate_interval(
             source, calibration, frozenset({"A"}), start_utc=start,
