@@ -28,8 +28,8 @@ def samples():
     items = pd.DataFrame([
         {"source_stock_code": "85123A", "unit_price": Decimal("1.50"), "is_positive_sale": True},
         {"source_stock_code": "85123B", "unit_price": Decimal("0.000"), "is_positive_sale": False},
-        {"source_stock_code": "85123C", "unit_price": Decimal("2"), "is_positive_sale": True},
-        {"source_stock_code": "POST", "unit_price": Decimal("4"), "is_positive_sale": False},
+        {"source_stock_code": "85123C", "unit_price": Decimal(2), "is_positive_sale": True},
+        {"source_stock_code": "POST", "unit_price": Decimal(4), "is_positive_sale": False},
     ])
     bronze = pd.DataFrame([
         {"StockCode": "85123A", "Description": "The product"},
