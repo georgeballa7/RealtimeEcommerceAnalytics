@@ -5,10 +5,10 @@ The caller supplies an authenticated psycopg connection and a trusted SQL direct
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-import re
 
 MIGRATION_NAME = re.compile(r"^([0-9]{3})_[a-z][a-z0-9_]*\.sql$")
 ADVISORY_LOCK_KEY = 735184221  # Project-specific transactional PostgreSQL advisory lock.
