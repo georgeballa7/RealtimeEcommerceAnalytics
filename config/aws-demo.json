@@ -14,7 +14,23 @@
       "subnet-0248e35f98ea3fbf6",
       "subnet-0481cb476d153d5ba"
     ],
-    "security_groups": ["sg-0128bc9b086b7072b"],
+    "security_groups": [
+      "sg-0128bc9b086b7072b"
+    ],
     "expected_customer_count": 5942
+  },
+  "catalog_sync": {
+    "repository": "ecommerce-catalog-sync-demo",
+    "dockerfile": "Dockerfile.catalog-sync",
+    "task_family": "ecommerce-catalog-sync-demo",
+    "container": "catalog-sync",
+    "log_group": "/ecs/ecommerce-demo/catalog-sync",
+    "subnets": [
+      "subnet-0248e35f98ea3fbf6",
+      "subnet-0481cb476d153d5ba"
+    ],
+    "security_groups": [
+      "sg-0128bc9b086b7072b"
+    ]
   }
 }
