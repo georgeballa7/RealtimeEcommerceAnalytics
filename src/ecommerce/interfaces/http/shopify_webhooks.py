@@ -10,7 +10,6 @@ import hashlib
 import hmac
 import json
 import os
-from collections.abc import Callable
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
