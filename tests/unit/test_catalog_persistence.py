@@ -100,9 +100,8 @@ def test_lease_claim_and_token_fenced_release():
 def test_concurrent_claim_is_rejected():
     conn = Connection(busy=True)
     lease = PostgresCatalogLease(conn, "gid://shopify/Shop/1")
-    with pytest.raises(CatalogLeaseBusy):
-        with lease.claim(str(uuid4())):
-            pytest.fail("Should not acquire a busy lease")
+    with pytest.raises(CatalogLeaseBusy), lease.claim(str(uuid4())):
+        pytest.fail("Should not acquire a busy lease")
     assert len(conn.queries) == 1
 
 
