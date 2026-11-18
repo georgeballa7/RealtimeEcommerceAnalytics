@@ -35,12 +35,10 @@ PRODUCT_VARIANTS = """query ProductDefaultVariant($id: ID!) {
     variants(first: 3) { nodes { id sku title } }
   }
 }"""
-VARIANT_UPDATE = """mutation UpdateHistoricalDefaultVariant(
-  $productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-  productVariantsBulkUpdate(
-    productId: $productId, variants: $variants, allowPartialUpdates: false
-  ) {
-    productVariants { id sku }
+VARIANT_SET = """mutation UpdateHistoricalDefaultVariant(
+  $identifier: ProductSetIdentifiers, $input: ProductSetInput!) {
+  productSet(identifier: $identifier, input: $input, synchronous: true) {
+    product { id variants(first: 3) { nodes { id sku } } }
     userErrors { code field }
   }
 }"""
@@ -161,15 +159,22 @@ class ShopifyCatalogClient:
         if variants[0].get("title") != "Default Title":
             raise ShopifyError("Unexpected default Shopify variant title")
         result = self.graphql.query(
-            VARIANT_UPDATE,
+            VARIANT_SET,
             {
-                "productId": product_gid,
-                "variants": [{"id": variants[0]["id"], "sku": candidate.sku}],
+                "identifier": {"id": product_gid},
+                "input": {
+                    "variants": [{"id": variants[0]["id"], "sku": candidate.sku}],
+                },
             },
             mutation=True,
-        ).get("productVariantsBulkUpdate") or {}
-        _raise_user_errors(result, "productVariantsBulkUpdate")
-        nodes = result.get("productVariants") or []
+        ).get("productSet") or {}
+        _raise_user_errors(result, "productSet variant update")
+        product = result.get("product") or {}
+        if product.get("id") != product_gid:
+            raise ShopifyError("Variant update returned wrong product")
+        nodes = ((product.get("variants") or {}).get("nodes") or [])
         if len(nodes) != 1 or nodes[0].get("sku") != candidate.sku:
             raise ShopifyError("Variant update returned unexpected payload")
+        if nodes[0].get("id") != variants[0]["id"]:
+            raise ShopifyError("Variant update replaced original default variant")
         return _validate_gid(nodes[0].get("id"), "ProductVariant")
