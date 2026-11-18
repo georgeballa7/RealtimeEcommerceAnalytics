@@ -31,20 +31,19 @@ class PostgresCustomerIdentityRepository:
         if not gid.startswith("gid://shopify/Customer/"):
             raise ValueError("Invalid customer GID")
         # DB uniqueness + conditional upsert detects source/customer remapping.
-        with self.connection.transaction():
-            with self.connection.cursor() as cur:
-                cur.execute("""INSERT INTO shopify_customer_identity
-                    (shop_gid, customer_id, source_system, source_customer_id, shopify_customer_gid, status)
-                    VALUES (%s, %s, 'uci_online_retail_ii', %s, %s, 'verified')
-                    ON CONFLICT (shop_gid, customer_id) DO UPDATE SET
-                        shopify_customer_gid = EXCLUDED.shopify_customer_gid,
-                        status = 'verified', updated_at = now()
-                    WHERE shopify_customer_identity.shopify_customer_gid = EXCLUDED.shopify_customer_gid
-                      AND shopify_customer_identity.source_customer_id = EXCLUDED.source_customer_id
-                    RETURNING customer_id""",
-                    (self.shop_gid, customer.customer_id, customer.source_customer_id, gid))
-                if cur.fetchone() is None:
-                    raise ValueError("Conflicting Shopify customer mapping")
+        with self.connection.transaction(), self.connection.cursor() as cur:
+            cur.execute("""INSERT INTO shopify_customer_identity
+                (shop_gid, customer_id, source_system, source_customer_id, shopify_customer_gid, status)
+                VALUES (%s, %s, 'uci_online_retail_ii', %s, %s, 'verified')
+                ON CONFLICT (shop_gid, customer_id) DO UPDATE SET
+                    shopify_customer_gid = EXCLUDED.shopify_customer_gid,
+                    status = 'verified', updated_at = now()
+                WHERE shopify_customer_identity.shopify_customer_gid = EXCLUDED.shopify_customer_gid
+                  AND shopify_customer_identity.source_customer_id = EXCLUDED.source_customer_id
+                RETURNING customer_id""",
+                (self.shop_gid, customer.customer_id, customer.source_customer_id, gid))
+            if cur.fetchone() is None:
+                raise ValueError("Conflicting Shopify customer mapping")
 
     def count_verified(self) -> int:
         with self.connection.cursor() as cur:
