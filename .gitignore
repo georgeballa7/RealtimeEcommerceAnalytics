@@ -227,3 +227,17 @@ data/bronze/
 
 # Generated local audit outputs
 reports/*.json
+
+
+# Temporary Terraform plans and architecture diagrams
+infrastructure/terraform/tfplan*
+infrastructure/terraform/terraform-graph.dot
+infrastructure/terraform/terraform-graph.svg
+
+# Generated historical catalog audit artifacts
+/catalog-review-*.json
+/catalog-approval-*.json
+
+# Temporary Shopify diagnostic scripts
+/inspect_shopify_schema.py
+/verify_shopify.py
