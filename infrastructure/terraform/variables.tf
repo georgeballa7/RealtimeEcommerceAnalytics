@@ -119,6 +119,12 @@ variable "api_container_port" {
   type = number
   default = 8000
 }
+variable "alert_email" {
+  description = "Email endpoint for infrastructure CloudWatch alarm notifications; recipient must confirm SNS subscription."
+  type        = string
+  default     = "george.data.alerts@gmail.com"
+}
+
 variable "db_multi_az" {
   type = bool
   default = false
