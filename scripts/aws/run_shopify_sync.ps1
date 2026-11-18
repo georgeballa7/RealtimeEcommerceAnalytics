@@ -74,7 +74,10 @@ if ($Workload -eq 'catalog_sync') {
     if ($ApprovalKey -notlike 'historical/online_retail_ii/catalog_approval/v1/*') {
         throw 'Unexpected catalog approval S3 prefix.'
     }
-    if ($ApprovalSha256 -cnotmatch '^[a-f0-9]{64}
+    if ($ApprovalSha256 -cnotmatch '^[a-f0-9]{64}$') {
+        throw 'ApprovalSha256 must be a lowercase hex SHA-256.'
+    }
+}
 $cmd = @('--bucket', "$($config.landing_bucket)", '--limit', "$Limit")
 if ($Workload -eq 'customer_sync') {
     $cmd += @('--batch-size', "$BatchSize")
