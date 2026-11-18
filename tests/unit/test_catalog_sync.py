@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from ecommerce.application.use_cases.catalog_selection import CatalogCandidate
-from ecommerce.application.use_cases.catalog_sync import reconcile_catalog
+from ecommerce.application.use_cases.catalog_sync import reconcile_catalog, reconcile_catalog_batches
 
 
 def candidate():
@@ -153,3 +153,64 @@ def test_duplicate_candidate_rejected():
     c = candidate()
     with pytest.raises(ValueError, match="Duplicate product"):
         reconcile_catalog([c, c], API(), Repo())
+
+
+def test_batched_full_catalog_and_restart_are_idempotent():
+    items = [candidate() for _ in range(205)]
+    api, repo, lease = API(), Repo(), Lease()
+    progress = []
+    result = reconcile_catalog_batches(
+        items, api, repo, batch_size=100, allow_write=True, lease=lease,
+        on_batch=lambda n, total, batch: progress.append((n, total, batch.inspected)),
+    )
+    assert result.inspected == 205
+    assert result.product_mappings_verified == 205
+    assert result.variant_mappings_verified == 205
+    assert result.product_creates_requested == 205
+    assert result.variant_creates_requested == 205
+    assert progress == [(1, 3, 100), (2, 3, 100), (3, 3, 5)]
+    second = reconcile_catalog_batches(
+        items, api, repo, batch_size=100, allow_write=True, lease=lease,
+    )
+    assert second.inspected == 205
+    assert second.product_creates_requested == 0
+    assert second.variant_creates_requested == 0
+    assert len(repo.products) == 205
+    assert len(repo.variants) == 205
+
+
+def test_batched_failure_stops_and_resumes_from_verified_remote_state():
+    items = [candidate() for _ in range(3)]
+    api, repo, lease = API(), Repo(), Lease()
+    api.fail_after_product_create_once = True
+    progress = []
+    with pytest.raises(TimeoutError):
+        reconcile_catalog_batches(
+            items, api, repo, batch_size=2, allow_write=True, lease=lease,
+            on_batch=lambda n, total, batch: progress.append(n),
+        )
+    assert progress == []
+    assert api.product_creates == 1
+    result = reconcile_catalog_batches(
+        items, api, repo, batch_size=2, allow_write=True, lease=lease,
+    )
+    assert result.product_creates_requested == 2
+    assert result.variant_creates_requested == 3
+    assert result.variant_mappings_verified == 3
+
+
+def test_batched_rejects_duplicate_across_batch_boundary_before_any_writes():
+    c = candidate()
+    api = API()
+    with pytest.raises(ValueError, match="Duplicate"):
+        reconcile_catalog_batches(
+            [c, candidate(), c], api, Repo(),
+            batch_size=2, allow_write=True, lease=Lease(),
+        )
+    assert api.product_creates == 0
+
+
+@pytest.mark.parametrize("size", [0, -1, 1001])
+def test_invalid_catalog_batch_size_fails_closed(size):
+    with pytest.raises(ValueError, match="batch size"):
+        reconcile_catalog_batches([candidate()], API(), Repo(), batch_size=size)
