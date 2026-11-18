@@ -54,7 +54,7 @@ def analyze_exceptions(tables: dict[str, pd.DataFrame], *, bronze: pd.DataFrame 
             if count > 1:
                 descriptions = observed.loc[observed["stock_key"].eq(code), "description_key"]
                 ambiguous.append({"stock_code": str(code), "distinct_descriptions": int(count),
-                                  "source_lines": int(len(descriptions)),
+                                  "source_lines": len(descriptions),
                                   "description_samples": descriptions.dropna().drop_duplicates().head(5).tolist()})
         ambiguous.sort(key=lambda x: (-x["distinct_descriptions"], -x["source_lines"], x["stock_code"]))
     review_codes = (items.loc[items["item_class"].eq("requires_review"),
