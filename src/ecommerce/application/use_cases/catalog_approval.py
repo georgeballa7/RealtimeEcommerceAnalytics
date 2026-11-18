@@ -45,13 +45,16 @@ def selected_catalog(
     if limit < 0:
         raise ValueError("Catalog limit must be non-negative")
     candidates = tuple(candidates)
-    if allow_write:
-        if not approved:
+    if approved is None:
+        if allow_write:
             raise ValueError("Write-enabled sync requires reviewed catalog approvals")
-        known = {item.source_stock_code for item in candidates}
-        if not approved.issubset(known):
-            raise ValueError("Catalog approvals reference unknown or ineligible codes")
-        candidates = tuple(c for c in candidates if c.source_stock_code in approved)
+        return candidates[:limit]
+    if not approved:
+        raise ValueError("Approved catalog cannot be empty")
+    known = {item.source_stock_code for item in candidates}
+    if not approved.issubset(known):
+        raise ValueError("Catalog approvals reference unknown or ineligible codes")
+    candidates = tuple(c for c in candidates if c.source_stock_code in approved)
     return candidates[:limit]
 
 def manifest_from_audit(report: dict) -> bytes:
