@@ -11,7 +11,6 @@ from typing import Any
 import pandas as pd
 
 
-
 def _price_is_zero(value: Any) -> bool:
     return pd.notna(value) and Decimal(str(value)) == 0
 
