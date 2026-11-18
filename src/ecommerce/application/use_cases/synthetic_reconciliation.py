@@ -46,7 +46,7 @@ def fetch(s3: Any, bucket: str, key: str, sha256: str | None = None) -> bytes:
 
 
 def utc(value: str) -> datetime:
-    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    timestamp = datetime.fromisoformat(value)
     require(
         timestamp.tzinfo is not None and timestamp.utcoffset() == timedelta(0),
         f"Non-UTC timestamp: {value}",
