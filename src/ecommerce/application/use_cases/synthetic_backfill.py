@@ -35,6 +35,8 @@ class SimulationPolicy:
     retail_units_per_line_cap: int = 12
     wholesale_units_per_line_cap: int = 100
     weekday_uniform_smoothing_percent: int = 25
+    cancellation_probability_percent: int = 10
+    cancellation_delay_max_days: int = 14
     currency: str = "EUR"
     version: str = "synthetic-2026-policy-v1"
 
@@ -51,6 +53,10 @@ class SimulationPolicy:
                 self.retail_line_cap, self.wholesale_line_cap,
                 self.retail_units_per_line_cap, self.wholesale_units_per_line_cap,
             ) <= 0
+            or not isinstance(self.cancellation_probability_percent, int)
+            or not 0 <= self.cancellation_probability_percent <= 100
+            or not isinstance(self.cancellation_delay_max_days, int)
+            or not 1 <= self.cancellation_delay_max_days <= 90
             or self.currency != "EUR"
             or self.version != "synthetic-2026-policy-v1"
         ):
@@ -196,8 +202,8 @@ def generate_interval(
     start_utc: datetime,
     cutoff_utc: datetime,
     policy: SimulationPolicy,
-) -> tuple[list[dict], list[dict]]:
-    """Emit canonical orders and items for an exact half-open UTC interval.
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Emit canonical orders, items, and linked cancellation events for UTC interval.
 
     This is a pure in-memory implementation. Actual publish/commit and
     continuation ledger safety are separate responsibilities.
@@ -218,7 +224,13 @@ def generate_interval(
     weekdays, months, hours, hour_weights = _seasonal_factors(calibration, policy)
     orders_out: list[dict] = []
     items_out: list[dict] = []
-    day = start_utc.date()
+    cancellations_out: list[dict] = []
+    # Inspect preceding days for cancellations due within this interval.
+    # Reconstructing order candidates is pure and does not republish old orders.
+    lookback_start = max(START_UTC.date(), start_utc.date() - timedelta(
+        days=policy.cancellation_delay_max_days
+    ))
+    day = lookback_start
     # Per-day seeds and event IDs are independent of the requested interval.
     while day <= cutoff_utc.date():
         rng = random.Random(_seed(policy.fingerprint, policy.seed, day.isoformat()))
@@ -236,8 +248,7 @@ def generate_interval(
             daily.append((event, sequence))
         # Stable chronological ordering, including across midnight cutoffs.
         for event, sequence in sorted(daily):
-            if not start_utc <= event < cutoff_utc:
-                continue
+            within_order_interval = start_utc <= event < cutoff_utc
             # Per-order streams ensure interval slicing cannot change content.
             item_rng = random.Random(_seed(policy.fingerprint, day.isoformat(), sequence))
             customer = _choose(item_rng, customers, customer_weights)
@@ -279,7 +290,8 @@ def generate_interval(
                     "event_time_utc": event.isoformat(),
                 })
             batch_id = f"synthetic-{day.isoformat()}-{policy.fingerprint[:12]}"
-            orders_out.append({
+            if within_order_interval:
+                orders_out.append({
                 "order_id": order_id,
                 "customer_id": customer,
                 "source_system": SYNTHETIC_SOURCE,
@@ -293,6 +305,37 @@ def generate_interval(
                 "batch_id": batch_id,
                 "policy_sha256": policy.fingerprint,
             })
-            items_out.extend(lines)
+                items_out.extend(lines)
+
+            # A cancellation is a separate, future-dated lifecycle event.
+            # It is a simulation assumption, NOT a verified historical refund.
+            cancel_rng = random.Random(_seed(policy.fingerprint, "cancel", source_order_key))
+            if cancel_rng.randrange(100) < policy.cancellation_probability_percent:
+                delay_days = 1 + cancel_rng.randrange(policy.cancellation_delay_max_days)
+                cancellation_time = event + timedelta(days=delay_days)
+                if start_utc <= cancellation_time < cutoff_utc:
+                    cancelled_line = lines[cancel_rng.randrange(len(lines))]
+                    cancelled_units = 1 + cancel_rng.randrange(cancelled_line["quantity"])
+                    cancellation_key = f"{source_order_key}:cancellation"
+                    cancellations_out.append({
+                        "event_id": canonical_id("event", SYNTHETIC_SOURCE, cancellation_key),
+                        "event_type": "order_item_cancelled",
+                        "order_id": order_id,
+                        "order_item_id": cancelled_line["order_item_id"],
+                        "customer_id": customer,
+                        "product_id": cancelled_line["product_id"],
+                        "variant_id": cancelled_line["variant_id"],
+                        "source_stock_code": cancelled_line["source_stock_code"],
+                        "cancelled_quantity": cancelled_units,
+                        "event_time_utc": cancellation_time.isoformat(),
+                        "original_order_time_utc": event.isoformat(),
+                        "currency": policy.currency,
+                        "synthetic": True,
+                        "source_system": SYNTHETIC_SOURCE,
+                        "provenance": "simulated_cancellation_not_verified_refund",
+                        "batch_id": f"synthetic-{cancellation_time.date()}-{policy.fingerprint[:12]}",
+                        "policy_sha256": policy.fingerprint,
+                    })
         day += timedelta(days=1)
-    return orders_out, items_out
+    cancellations_out.sort(key=lambda c: (c["event_time_utc"], c["event_id"]))
+    return orders_out, items_out, cancellations_out
