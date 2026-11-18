@@ -122,7 +122,7 @@ def upload_verified_bronze(
             s3.upload_file(str(local_file), bucket, key, ExtraArgs={"Metadata": {"sha256": expected_hash}})
             actual_hash = _remote_sha256(s3, bucket, key)
             if actual_hash != expected_hash:
-                raise IOError(f"S3 checksum mismatch: s3://{bucket}/{key}")
+                raise OSError(f"S3 checksum mismatch: s3://{bucket}/{key}")
 
         published = {
             **manifest,
@@ -142,5 +142,5 @@ def upload_verified_bronze(
         )
         observed = s3.get_object(Bucket=bucket, Key=manifest_key)["Body"].read()
         if observed != payload:
-            raise IOError("Uploaded manifest did not verify")
+            raise OSError("Uploaded manifest did not verify")
         return published
