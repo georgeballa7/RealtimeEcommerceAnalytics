@@ -8,6 +8,7 @@ The temporary Docker config workaround matches the engineering runbook.
 [CmdletBinding()]
 param(
     [string]$ConfigPath = 'config/aws-demo.json',
+    [ValidateSet('customer_sync','catalog_sync')][string]$Workload = 'customer_sync',
     [string]$ImageTag,
     [switch]$Execute,
     [switch]$ConfirmPublish
@@ -22,7 +23,7 @@ function Assert-Exit([string]$Step) {
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $cfgPath = Join-Path $root $ConfigPath
 $config = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json
-$work = $config.customer_sync
+$work = $config.$Workload
 $common = @('--region', "$($config.region)", '--profile', "$($config.profile)")
 $account = & aws sts get-caller-identity @common --query Account --output text
 Assert-Exit 'AWS identity'
@@ -60,8 +61,12 @@ if ($LASTEXITCODE -eq 0 -and "$existing" -match '^sha256:[a-f0-9]{64}$') {
 Push-Location $root
 $tempConfig = $null
 try {
-    & python -m pytest -q tests/unit/test_shopify_customer_sync.py tests/unit/test_shopify_sync_ledger.py
-    Assert-Exit 'Customer-sync regression tests'
+    if ($Workload -eq 'customer_sync') {
+        & python -m pytest -q tests/unit/test_shopify_customer_sync.py tests/unit/test_shopify_sync_ledger.py tests/unit/test_customer_sync_runner.py
+    } else {
+        & python -m pytest -q tests/unit/test_catalog_selection.py tests/unit/test_catalog_sync.py tests/unit/test_catalog_persistence.py tests/unit/test_shopify_catalog_client.py
+    }
+    Assert-Exit 'Workload regression tests'
     & docker build --file $dockerfile --label "org.opencontainers.image.revision=$sha" --tag $local .
     Assert-Exit 'Docker build'
     & docker tag $local $remote
