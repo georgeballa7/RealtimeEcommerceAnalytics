@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 AWS_DEFAULT_REGION=eu-central-1
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl --fail --silent --show-error \
+       https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+       -o /etc/ssl/certs/rds-global-bundle.pem \
+    && test -s /etc/ssl/certs/rds-global-bundle.pem \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/app
+COPY scripts/bootstrap_database_user.py /opt/app/bootstrap_database_user.py
+COPY infrastructure/sql/001_shopify_customer_identity.sql /opt/app/sql/
+COPY infrastructure/sql/002_shopify_customer_sync_ledger.sql /opt/app/sql/
+COPY infrastructure/sql/003_shopify_customer_sync_lease.sql /opt/app/sql/
+RUN pip install --no-cache-dir 'boto3>=1.35' 'psycopg[binary]>=3.2' \
+    && useradd --system --uid 10001 ecommerce
+USER ecommerce
+ENTRYPOINT ["python", "/opt/app/bootstrap_database_user.py"]

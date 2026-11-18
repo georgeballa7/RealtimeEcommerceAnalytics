@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Original historical datasets must remain outside Git.
+data/raw/
+
+# Keep all generated historical exports and manifests local.
+data/bronze/
+
+# Generated local audit outputs
+reports/*.json
