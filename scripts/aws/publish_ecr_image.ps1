@@ -53,9 +53,12 @@ Write-Host "Target: $remote"
 if (-not $Execute) { Write-Host 'PREVIEW ONLY: add -Execute -ConfirmPublish'; return }
 if (-not $ConfirmPublish) { throw 'Explicit -ConfirmPublish required' }
 
-# Fail closed if immutable tag exists; avoid rebuilding/pushing an existing release.
-$existing = & aws ecr describe-images --repository-name $repository --image-ids "imageTag=$ImageTag" @common --query 'imageDetails[0].imageDigest' --output text 2>$null
-if ($LASTEXITCODE -eq 0 -and "$existing" -match '^sha256:[a-f0-9]{64}$') {
+# Listing tagged images succeeds with an empty collection for a new repository.
+# Unlike describe-images with --image-ids, a missing tag is not an AWS CLI error.
+# Any genuine AWS/API failure must stop publication rather than be swallowed.
+$existing = & aws ecr list-images --repository-name $repository --filter tagStatus=TAGGED @common --query "imageIds[?imageTag=='$ImageTag'].imageDigest" --output text
+Assert-Exit 'ECR image tag availability check'
+if ("$existing".Trim()) {
     throw 'Immutable image tag already exists. Use a new committed revision/tag.'
 }
 Push-Location $root
