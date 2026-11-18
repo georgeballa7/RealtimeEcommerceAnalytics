@@ -5,7 +5,10 @@ from uuid import uuid4
 import pytest
 
 from ecommerce.application.use_cases.catalog_selection import CatalogCandidate
-from ecommerce.application.use_cases.catalog_sync import reconcile_catalog, reconcile_catalog_batches
+from ecommerce.application.use_cases.catalog_sync import (
+    reconcile_catalog,
+    reconcile_catalog_batches,
+)
 
 
 def candidate():
