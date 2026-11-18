@@ -101,7 +101,7 @@ def main() -> None:
     if silver["schema_version"] != "online-retail-ii-silver-v1":
         raise ValueError("Unexpected Silver version")
 
-    orders, items = generate_interval(
+    orders, items, cancellations = generate_interval(
         tables, calibration, approved,
         start_utc=start_utc,
         cutoff_utc=invocation_cutoff_utc,
@@ -116,6 +116,7 @@ def main() -> None:
         "calibration_sha256": calibration_sha256(calibration),
         "orders": len(orders),
         "order_items": len(items),
+        "cancellations": len(cancellations),
         "approved_stock_codes": len(approved),
         "published": False,
     }
@@ -123,7 +124,7 @@ def main() -> None:
         manifest = publish_synthetic_interval(
             s3, bucket=args.bucket,
             start_utc=start_utc, cutoff_utc=invocation_cutoff_utc,
-            orders=orders, items=items,
+            orders=orders, items=items, cancellations=cancellations,
             policy_sha256=policy.fingerprint,
             calibration_sha256=calibration_sha256(calibration),
             source_bronze_sha256=bronze["source_sha256"],
