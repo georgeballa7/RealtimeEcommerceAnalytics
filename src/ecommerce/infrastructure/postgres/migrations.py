@@ -54,31 +54,30 @@ def apply_migrations(connection, migrations: list[Migration]) -> list[str]:
     if not migrations:
         raise ValueError("No migration files supplied")
     applied_now: list[str] = []
-    with connection.transaction():
-        with connection.cursor() as cur:
-            cur.execute("SELECT pg_advisory_xact_lock(%s)", (ADVISORY_LOCK_KEY,))
-            cur.execute("""CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                checksum_sha256 CHAR(64) NOT NULL,
-                installed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )""")
-            cur.execute("SELECT version, filename, checksum_sha256 FROM schema_migrations ORDER BY version")
-            applied = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-            expected = {migration.version: migration for migration in migrations}
-            unknown = set(applied) - set(expected)
-            if unknown:
-                raise RuntimeError(f"Unknown migration versions present in database: {sorted(unknown)}")
-            for migration in migrations:
-                known = applied.get(migration.version)
-                if known is not None:
-                    if known != (migration.name, migration.checksum):
-                        raise RuntimeError(f"Migration checksum mismatch: {migration.version}")
-                    continue
-                # Execute the trusted SQL file as a whole; no naïve semicolon splitting.
-                cur.execute(migration.sql)
-                cur.execute("""INSERT INTO schema_migrations
-                    (version, filename, checksum_sha256) VALUES (%s, %s, %s)""",
-                    (migration.version, migration.name, migration.checksum))
-                applied_now.append(migration.version)
+    with connection.transaction(), connection.cursor() as cur:
+        cur.execute("SELECT pg_advisory_xact_lock(%s)", (ADVISORY_LOCK_KEY,))
+        cur.execute("""CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            filename TEXT NOT NULL,
+            checksum_sha256 CHAR(64) NOT NULL,
+            installed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""")
+        cur.execute("SELECT version, filename, checksum_sha256 FROM schema_migrations ORDER BY version")
+        applied = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+        expected = {migration.version: migration for migration in migrations}
+        unknown = set(applied) - set(expected)
+        if unknown:
+            raise RuntimeError(f"Unknown migration versions present in database: {sorted(unknown)}")
+        for migration in migrations:
+            known = applied.get(migration.version)
+            if known is not None:
+                if known != (migration.name, migration.checksum):
+                    raise RuntimeError(f"Migration checksum mismatch: {migration.version}")
+                continue
+            # Execute the trusted SQL file as a whole; no naïve semicolon splitting.
+            cur.execute(migration.sql)
+            cur.execute("""INSERT INTO schema_migrations
+                (version, filename, checksum_sha256) VALUES (%s, %s, %s)""",
+                (migration.version, migration.name, migration.checksum))
+            applied_now.append(migration.version)
     return applied_now
