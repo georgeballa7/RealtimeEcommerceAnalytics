@@ -12,7 +12,7 @@ import math
 import random
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, time, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 import pandas as pd
 
@@ -321,6 +321,8 @@ def generate_interval(
                     "unit_price": price,
                     "line_amount": str(value.quantize(PENNY)),
                     "currency": policy.currency,
+                    "currency_assumption": "GBP_assumed_from_UK_source_not_verified",
+                    "pricing_method": "approved_source_sku_positive_price_median_v1",
                     "synthetic": True,
                     "source_system": SYNTHETIC_SOURCE,
                     "event_time_utc": event.isoformat(),
@@ -366,7 +368,7 @@ def generate_interval(
                         "cancelled_quantity": cancelled_units,
                         "unit_price": cancelled_line["unit_price"],
                         "cancelled_amount": str(cancelled_amount),
-                        "financial_semantics": "gross_sales_less_simulated_cancellations_not_refunds",
+                        "financial_semantics": "cancelled_merchandise_value_not_refund",
                         "event_time_utc": cancellation_time.isoformat(),
                         "original_order_time_utc": event.isoformat(),
                         "currency": policy.currency,
