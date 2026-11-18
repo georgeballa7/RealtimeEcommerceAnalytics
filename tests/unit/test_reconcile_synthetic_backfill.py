@@ -64,7 +64,7 @@ def make_sample():
         "order_id": "o-1", "customer_id": "c-1",
         "event_time_utc": (START + timedelta(hours=2)).isoformat(),
         "source_system": "synthetic_2026", "synthetic": True,
-        "currency": "GBP", "currency_assumption": GBP_ASSUMPTION,
+        "currency": "GBP",
         "order_total": "12.00",
     }
     item = {
@@ -84,7 +84,7 @@ def make_sample():
         "unit_price": "4.00", "cancelled_amount": "8.00",
         "event_time_utc": (START + timedelta(days=1, hours=2)).isoformat(),
         "original_order_time_utc": order["event_time_utc"],
-        "currency": "GBP", "currency_assumption": GBP_ASSUMPTION,
+        "currency": "GBP",
         "synthetic": True, "provenance": "simulated_cancellation_not_verified_refund",
     }
     publish_synthetic_interval(
@@ -104,7 +104,7 @@ def make_sample():
     return s3
 
 
-def test_reconciliation_passing_linked_cancellation_across_intervals(monkeypatch):
+def test_reconciliation_passing_published_v2_without_optional_order_event_metadata(monkeypatch):
     s3 = make_sample()
     from ecommerce.application.use_cases import synthetic_reconciliation as r
 
