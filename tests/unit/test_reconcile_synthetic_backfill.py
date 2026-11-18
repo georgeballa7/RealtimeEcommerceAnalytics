@@ -5,11 +5,8 @@ from hashlib import md5
 import pytest
 from botocore.exceptions import ClientError
 
-from ecommerce.application.use_cases.synthetic_publisher import (
-    DEFAULT_SYNTHETIC_PREFIX,
-    publish_synthetic_interval,
-)
-from scripts.reconcile_synthetic_backfill import reconcile
+from ecommerce.application.use_cases.synthetic_publisher import publish_synthetic_interval
+from ecommerce.application.use_cases.synthetic_reconciliation import reconcile
 
 SHA = "b" * 64
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -109,7 +106,7 @@ def make_sample():
 
 def test_reconciliation_passing_linked_cancellation_across_intervals(monkeypatch):
     s3 = make_sample()
-    from scripts import reconcile_synthetic_backfill as r
+    from ecommerce.application.use_cases import synthetic_reconciliation as r
 
     # Supply a fixed fake allowlist and hash solely for this isolated test.
     catalog = b'{"schema_version":"catalog-approval-v1","approved_stock_codes":["A"]}\n'
@@ -129,7 +126,7 @@ def test_reconciliation_passing_linked_cancellation_across_intervals(monkeypatch
 
 def test_reconciliation_fails_on_corrupt_committed_asset(monkeypatch):
     s3 = make_sample()
-    from scripts import reconcile_synthetic_backfill as r
+    from ecommerce.application.use_cases import synthetic_reconciliation as r
 
     catalog = b'{"schema_version":"catalog-approval-v1","approved_stock_codes":["A"]}\n'
     import hashlib
