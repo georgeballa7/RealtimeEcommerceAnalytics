@@ -11,6 +11,11 @@ from hashlib import sha256
 
 import pandas as pd
 
+from ecommerce.application.use_cases.calibration_statistics import (
+    calendar_exposure,
+    empirical_percentiles,
+)
+
 
 def calibrate_historical_behavior(
     tables: dict[str, pd.DataFrame],
@@ -82,8 +87,15 @@ def calibrate_historical_behavior(
     product_counts = positive.groupby("source_stock_code")["quantity"].sum()
 
     cancellations = items["is_cancellation"].fillna(False).eq(True)
+    cancelled_order_count = int(items.loc[cancellations, "order_id"].nunique())
+    cancellation_order_ids = set(items.loc[cancellations, "order_id"])
+    approved_cancelled_order_count = int(observed["order_id"].isin(cancellation_order_ids).sum())
+    exposure = calendar_exposure(timestamps)
+    monthly_counts = Counter(timestamp_lookup.dt.to_period("M").astype(str))
+    weekday_counts = Counter(timestamp_lookup.dt.day_of_week)
+    customer_values = [int(by_customer.get(cid, 0)) for cid in customers["customer_id"]]
     return {
-        "schema_version": "historical-behavior-calibration-v1",
+        "schema_version": "historical-behavior-calibration-v2",
         "source_bronze_sha256": source_sha256,
         "source_timestamp_semantics": "timezone_naive_no_utc_assumption",
         "currency_semantics": "unknown_source_currency_no_monetary_calibration",
@@ -94,6 +106,30 @@ def calibrate_historical_behavior(
         "approved_positive_lines": len(positive),
         "excluded_positive_lines": int((is_sale & ~is_approved).sum()),
         "cancelled_source_lines": int(cancellations.sum()),
+        "source_orders_with_cancellation_lines": cancelled_order_count,
+        "source_orders_without_cancellation_lines": len(orders) - cancelled_order_count,
+        "approved_positive_orders_with_cancellation_lines": approved_cancelled_order_count,
+        "cancellation_order_rate_denominator": "all customer-linked source orders",
+        "customer_order_count_percentiles": empirical_percentiles(customer_values),
+        "basket_line_count_percentiles": empirical_percentiles(basket["lines"].tolist()),
+        "basket_unit_count_percentiles": empirical_percentiles(
+            [int(value) for value in basket["units"]]
+        ),
+        **exposure,
+        "monthly_orders_per_exposure_day": {
+            month: {
+                "orders": int(monthly_counts.get(month, 0)),
+                "exposure_days": days,
+            }
+            for month, days in exposure["month_exposure_days"].items()
+        },
+        "weekday_orders_per_exposure_day": {
+            day: {
+                "orders": int(weekday_counts.get(int(day), 0)),
+                "exposure_days": days,
+            }
+            for day, days in exposure["weekday_exposure_days"].items()
+        },
         "customer_order_count_histogram": {
             str(n): int(count) for n, count in sorted(customer_counts.items())
         },
@@ -106,12 +142,12 @@ def calibrate_historical_behavior(
         "monthly_order_counts": {
             str(month): int(count)
             for month, count in sorted(
-                Counter(timestamp_lookup.dt.to_period("M").astype(str)).items()
+                monthly_counts.items()
             )
         },
         "weekday_order_counts": {
             str(day): int(count)
-            for day, count in sorted(Counter(timestamp_lookup.dt.day_of_week).items())
+            for day, count in sorted(weekday_counts.items())
         },
         "hour_order_counts": {
             str(hour): int(count)
@@ -127,6 +163,9 @@ def calibrate_historical_behavior(
             "Source currency not recorded",
             "Anonymous customer transactions excluded from customer-linked Silver",
             "Cancellations do not prove matched refunds",
+            "Order-level cancellation flags mean at least one line flagged; not a refund rate",
+            "Invoice date span exposure includes incomplete boundary dates",
+            "Customer order frequency counts cover a shared observation window, not customer tenure",
             "Only approved, positive merchandise lines calibrate synthetic baskets",
         ],
     }
