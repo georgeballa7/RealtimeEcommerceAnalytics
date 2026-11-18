@@ -247,3 +247,31 @@ def test_customer_set_rejects_invalid_source_id_before_mutation():
         pytest.raises(ValueError, match="numeric historical source"),
     ):
         api.upsert_customer(str(uuid4()), "not-an-id")
+
+
+def test_graphql_errors_report_only_safe_code_and_schema_field():
+    """GraphQL top-level errors are diagnosed without exposing customer data."""
+    def respond(_request):
+        return httpx.Response(200, json={"errors": [
+            {
+                "message": "Field 'firstName' doesn't exist on type 'CustomerSetInput'",
+                "extensions": {"code": "GRAPHQL_VALIDATION_FAILED"},
+            },
+            {
+                "message": "Sensitive value private@example.com with token abc123",
+                "extensions": {"code": "ACCESS_DENIED"},
+            },
+        ]})
+
+    cfg = ShopifyConfig("test-shop.myshopify.com", "secret")
+    with (
+        httpx.Client(transport=httpx.MockTransport(respond)) as http,
+        ShopifyGraphQLClient(cfg, client=http) as api,
+        pytest.raises(ShopifyError) as err,
+    ):
+        api.upsert_customer(str(uuid4()), "17850")
+    message = str(err.value)
+    assert "GRAPHQL_VALIDATION_FAILED@CustomerSetInput.firstName" in message
+    assert "ACCESS_DENIED" in message
+    assert "private@example.com" not in message
+    assert "abc123" not in message
