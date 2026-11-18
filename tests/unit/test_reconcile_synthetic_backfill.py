@@ -57,8 +57,12 @@ class FakeS3:
 
 def make_sample():
     s3 = FakeS3()
-    # The approved manifest is pinned by its real SHA; use the original
-    # production allowlist with a checksum-verified synthetic test adapter.
+    # Isolated catalog fixture with its own pinned SHA.
+    catalog = b'{"schema_version":"catalog-approval-v1","approved_stock_codes":["A"]}\\n'
+    import hashlib
+
+    s3.objects[APPROVAL] = catalog
+    catalog_sha = hashlib.sha256(catalog).hexdigest()
     order = {
         "order_id": "o-1", "customer_id": "c-1",
         "event_time_utc": (START + timedelta(hours=2)).isoformat(),
@@ -91,14 +95,14 @@ def make_sample():
         cutoff_utc=START + timedelta(days=1),
         orders=[order], items=[item], cancellations=[],
         policy_sha256=SHA, calibration_sha256=SHA,
-        source_bronze_sha256=SHA, approved_catalog_sha256=SHA,
+        source_bronze_sha256=SHA, approved_catalog_sha256=catalog_sha,
     )
     publish_synthetic_interval(
         s3, bucket="example", start_utc=START + timedelta(days=1),
         cutoff_utc=START + timedelta(days=2),
         orders=[], items=[], cancellations=[cancellation],
         policy_sha256=SHA, calibration_sha256=SHA,
-        source_bronze_sha256=SHA, approved_catalog_sha256=SHA,
+        source_bronze_sha256=SHA, approved_catalog_sha256=catalog_sha,
     )
     return s3
 
