@@ -33,7 +33,7 @@ class WebhookEnvelope:
     payload: dict
 
     @classmethod
-    def from_sqs_body(cls, text: str) -> "WebhookEnvelope":
+    def from_sqs_body(cls, text: str) -> WebhookEnvelope:
         if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_MESSAGE_BYTES:
             raise InvalidEvent("Invalid message size")
         try:
@@ -149,7 +149,7 @@ class SqsToS3LandingConsumer:
             counts["received"] += 1
             try:
                 outcome = self.process_message(message)
-            except Exception:
+            except Exception:  # noqa: BLE001 - preserve failed messages for SQS redrive
                 counts["failed"] += 1
                 LOGGER.warning(
                     "SQS landing failed for message id=%s", message.get("MessageId", "?")
