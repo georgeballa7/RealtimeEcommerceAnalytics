@@ -11,7 +11,7 @@ import json
 import math
 import random
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import pandas as pd
