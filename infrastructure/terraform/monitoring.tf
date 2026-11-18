@@ -2,7 +2,12 @@ resource "aws_sns_topic" "alerts" {
   name = "ecommerce-${var.environment}-infra-alerts"
 }
 
-# SNS subscriptions are added separately after recipients approve them.
+# AWS requires the mailbox owner to confirm the subscription before alerts are delivered.
+resource "aws_sns_topic_subscription" "alerts_email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
 resource "aws_cloudwatch_metric_alarm" "dlq_nonempty" {
   alarm_name          = "ecommerce-${var.environment}-dlq-nonempty"
   namespace           = "AWS/SQS"
@@ -39,6 +44,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
   evaluation_periods  = 3
   threshold           = 80
   comparison_operator = "GreaterThanThreshold"
-  dimensions = { DBInstanceIdentifier = aws_db_instance.ecommerce.id }
+  dimensions = { DBInstanceIdentifier = aws_db_instance.ecommerce.identifier }
   alarm_actions = [aws_sns_topic.alerts.arn]
 }
