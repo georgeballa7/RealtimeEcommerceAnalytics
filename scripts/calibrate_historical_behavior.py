@@ -40,7 +40,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("reports/historical_calibration_v1.json"),
+        default=Path("reports/historical_calibration_v2.json"),
     )
     args = parser.parse_args()
     if args.output.exists():
