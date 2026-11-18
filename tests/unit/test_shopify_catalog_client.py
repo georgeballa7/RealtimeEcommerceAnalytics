@@ -28,18 +28,22 @@ class GraphQL:
                 {"id": self.product} if self.product else None
             )}
         if "productSet(" in document:
+            if "variants" in variables["input"]:
+                assert mutation
+                data = variables["input"]["variants"][0]
+                self.variants = [{
+                    "id": data["id"], "sku": data["sku"], "title": "Default Title",
+                }]
+                return {"productSet": {
+                    "product": {
+                        "id": self.product,
+                        "variants": {"nodes": self.variants},
+                    },
+                    "userErrors": [],
+                }}
             self.product = "gid://shopify/Product/77"
             return {"productSet": {
                 "product": {"id": self.product}, "userErrors": [],
-            }}
-        if "productVariantsBulkUpdate" in document:
-            assert mutation
-            data = variables["variants"][0]
-            self.variants = [{
-                "id": data["id"], "sku": data["sku"], "title": "Default Title",
-            }]
-            return {"productVariantsBulkUpdate": {
-                "productVariants": self.variants, "userErrors": [],
             }}
         if "product(id:" in document:
             return {"product": {
@@ -95,9 +99,13 @@ def test_existing_default_variant_is_reused_without_new_variant():
     assert client.lookup_variant(transport.product, c.sku) is None
     assert client.create_variant(transport.product, c) == "gid://shopify/ProductVariant/8"
     assert client.lookup_variant(transport.product, c.sku) == "gid://shopify/ProductVariant/8"
-    update_calls = [x for x in transport.calls if "productVariantsBulkUpdate" in x[0]]
+    update_calls = [
+        x for x in transport.calls
+        if "productSet(" in x[0] and "variants" in x[1]["input"]
+    ]
     assert len(update_calls) == 1
-    assert update_calls[0][1]["variants"] == [
+    assert update_calls[0][1]["identifier"] == {"id": transport.product}
+    assert update_calls[0][1]["input"]["variants"] == [
         {"id": "gid://shopify/ProductVariant/8", "sku": "85123A"}
     ]
 
