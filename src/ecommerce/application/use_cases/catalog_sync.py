@@ -7,8 +7,8 @@ The caller must hold an exclusive durable per-product lease for write mode.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, fields
 from typing import Protocol
 
 from ecommerce.application.use_cases.catalog_selection import CatalogCandidate
@@ -109,3 +109,40 @@ def reconcile_catalog(
     return CatalogSyncSummary(
         inspected, products, variants, pcreates, vcreates, missing_p, missing_v
     )
+
+
+def reconcile_catalog_batches(
+    candidates: Iterable[CatalogCandidate],
+    api: CatalogAPI,
+    repository: CatalogRepository,
+    *,
+    batch_size: int = 100,
+    allow_write: bool = False,
+    lease=None,
+    on_batch: Callable[[int, int, CatalogSyncSummary], None] | None = None,
+) -> CatalogSyncSummary:
+    """Process an approved, ordered selection sequentially in bounded batches.
+
+    Progress is reported only after a whole batch succeeds. A failed batch
+    propagates its exception and does not advance to subsequent batches.
+    Restarts re-read Shopify and RDS identities instead of relying on offsets.
+    """
+    if batch_size < 1 or batch_size > 1000:
+        raise ValueError("Catalog batch size must be between 1 and 1000")
+    items = tuple(candidates)
+    if len({item.product_id for item in items}) != len(items):
+        raise ValueError("Duplicate product in catalog sync run")
+    if allow_write and lease is None:
+        raise ValueError("Write-enabled catalog sync requires a durable lease")
+    totals = {field.name: 0 for field in fields(CatalogSyncSummary)}
+    total_batches = (len(items) + batch_size - 1) // batch_size
+    for start in range(0, len(items), batch_size):
+        summary = reconcile_catalog(
+            items[start:start + batch_size], api, repository,
+            allow_write=allow_write, lease=lease,
+        )
+        for field in fields(CatalogSyncSummary):
+            totals[field.name] += getattr(summary, field.name)
+        if on_batch is not None:
+            on_batch(start // batch_size + 1, total_batches, summary)
+    return CatalogSyncSummary(**totals)
