@@ -10,7 +10,7 @@ import gzip
 import hashlib
 import io
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 
 from botocore.exceptions import ClientError
 
