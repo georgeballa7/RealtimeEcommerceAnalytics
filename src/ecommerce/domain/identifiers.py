@@ -15,7 +15,7 @@ def canonical_id(entity: str, source_system: str, source_id: str) -> str:
     if not all(isinstance(value, str) and value.strip() for value in (entity, source_system, source_id)):
         raise ValueError('entity, source_system and source_id must be nonempty strings')
     # Normalize only surrounding whitespace; source identifiers are otherwise opaque.
-    key = '\x1f'.join((entity.strip(), source_system.strip(), source_id.strip()))
+    key = f'{entity.strip()}\x1f{source_system.strip()}\x1f{source_id.strip()}'
     return str(uuid5(CANONICAL_NAMESPACE, key))
 
 
