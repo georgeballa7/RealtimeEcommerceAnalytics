@@ -8,5 +8,7 @@
   "retail_units_per_line_cap": 12,
   "wholesale_units_per_line_cap": 100,
   "weekday_uniform_smoothing_percent": 25,
-  "currency": "EUR"
+  "currency": "EUR",
+  "cancellation_probability_percent": 10,
+  "cancellation_delay_max_days": 14
 }
