@@ -19,7 +19,7 @@ from ecommerce.application.use_cases.catalog_approval import (
     selected_catalog,
 )
 from ecommerce.application.use_cases.catalog_selection import select_catalog_candidates
-from ecommerce.application.use_cases.catalog_sync import reconcile_catalog
+from ecommerce.application.use_cases.catalog_sync import reconcile_catalog_batches
 from ecommerce.infrastructure.postgres.catalog_identity import (
     PostgresCatalogIdentityRepository,
 )
@@ -43,6 +43,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--bucket", required=True)
     p.add_argument("--prefix", default="historical/online_retail_ii/silver/v1")
     p.add_argument("--limit", type=int, default=5)
+    p.add_argument("--batch-size", type=int, default=100)
     p.add_argument("--aws-region", default="eu-central-1")
     p.add_argument("--aws-profile", default=None)
     p.add_argument("--allow-catalog-writes", action="store_true")
@@ -56,6 +57,8 @@ def main() -> None:
     args = p.parse_args()
     if args.limit < 0:
         p.error("Limit must be non-negative")
+    if not 1 <= args.batch_size <= 1000:
+        p.error("Batch size must be between 1 and 1000")
     missing = [key for key in REQUIRED_ENV if not os.environ.get(key)]
     if missing:
         p.error("Missing environment settings: " + ", ".join(missing))
@@ -89,6 +92,8 @@ def main() -> None:
                 "merchandise_candidates": len(selection.candidates),
                 "excluded_by_class": selection.excluded_by_class,
                 "selected": len(candidates),
+                "batch_size": args.batch_size,
+                "planned_batches": (len(candidates) + args.batch_size - 1) // args.batch_size,
                 "write_authorized": args.allow_catalog_writes,
                 "allowlist_verified": approved is not None,
                 "allowlist_population": len(approved) if approved is not None else None,
@@ -118,10 +123,29 @@ def main() -> None:
         ) as connection:
             repository = PostgresCatalogIdentityRepository(connection, shop_gid)
             lease = PostgresCatalogLease(connection, shop_gid)
-            summary = reconcile_catalog(
+            def log_batch(number, total, progress):
+                print(
+                    "Catalog batch: " + json.dumps(
+                        {
+                            "batch": number,
+                            "total_batches": total,
+                            "inspected": progress.inspected,
+                            "product_creates_requested": progress.product_creates_requested,
+                            "variant_creates_requested": progress.variant_creates_requested,
+                            "product_mappings_verified": progress.product_mappings_verified,
+                            "variant_mappings_verified": progress.variant_mappings_verified,
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+
+            summary = reconcile_catalog_batches(
                 candidates, api, repository,
+                batch_size=args.batch_size,
                 allow_write=args.allow_catalog_writes,
                 lease=lease if args.allow_catalog_writes else None,
+                on_batch=log_batch,
             )
             db_products, db_variants = repository.count_verified()
             print(
