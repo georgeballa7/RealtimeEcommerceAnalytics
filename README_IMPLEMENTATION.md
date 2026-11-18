@@ -1,31 +1,41 @@
-# Shopify Customer Identity Synchronization — Implementation Status
+# Historical Shopify Identity Synchronization — Implementation Status
 
-**Committed foundation:** [26467dd](https://github.com/georgeballa7/RealtimeEcommerceAnalytics/commit/26467ddcfb86dbbdd87f672eab5353033a8b6f55) on `feature/historical-data-foundation`. This includes the Shopify GraphQL client, customer identity SQL, PostgreSQL mapping repository, guarded small-batch sync use case and seven offline unit tests. This document records the implementation state; it is not an uncommitted proposal.
+The historical customer and product synchronization code is maintained in `feature/historical-data-foundation` until PR #3 is merged. The AWS application runtime is in `eu-central-1` using on-demand ECS/Fargate, private RDS PostgreSQL, Shopify Admin GraphQL, Secrets Manager, S3, and CloudWatch.
 
-**Verified externally on 17 November 2026:** The installed Shopify development-store app authenticated through the Admin GraphQL API; shop identity, the CUSTOMER metafield definition of type `id` at `custom.ecommerce_canonical_customer_id`, and granted `read_customers` / `write_customers` scopes passed a read-only Python check. No Shopify customer creation was performed during that verification.
+## Verified customer reconciliation (18 November 2026)
 
-**Not yet executed or verified:** The SQL migration has not been verified as applied to RDS. An AWS customer-sync ECS/Fargate task is not deployed. No live customer write, complete 5,942-customer reconciliation or bulk import has been performed. The existing SQL has uniqueness safeguards but no durable per-attempt ledger; the existing script is limited to five writes per invocation.
+- Historical Silver v1 contains 5,942 identifiable customer identities.
+- The authorized full customer-sync ECS run completed with exit code 0.
+- Final application result: 5,942/5,942 Shopify customer identities independently verified and mapped in RDS.
+- 5,842 mappings were newly verified during the final import and 100 were already present.
+- Do not rerun the completed customer population merely to retest deployment scripts.
 
-## AWS-only deployment plan
+## Historical catalog synchronization
 
-AWS `eu-central-1` is the sole application runtime. Shopify is the external development-store source. Private RDS PostgreSQL stores verified customer mappings and future durable sync state; S3 holds immutable historical Silver v1. The worker will run as an on-demand ECS/Fargate task in the existing VPC, using least-privilege IAM, Secrets Manager, verified RDS TLS and CloudWatch logs. Developer machines may run unit tests and CLI tooling, but are not a second operational deployment.
+- Source Silver v1 catalog contains 4,646 products and variants. Approval is restricted to 3,408 audit-unflagged merchandise stock codes; the remaining flagged/ineligible products are excluded.
+- Approval manifest is checksum pinned and its catalog selection is enforced in read-only and write-enabled runs.
+- The controlled five-product pilot succeeded, and its repeat run requested zero further Shopify product creations or variant updates.
+- On-demand catalog ECS task definition revision 3 uses a digest-pinned image and bounded sequential 100-product reconciliation batches, with per-batch CloudWatch summaries.
+- On 18 November 2026, the full 3,408-product sync was launched; **final completion and final verified RDS counts must be checked in ECS/CloudWatch before declaring it complete**.
 
-1. Add versioned, transaction-safe RDS migration execution, create a least-privilege application role and configure AWS credential injection; deploy only after review.
-2. Add a durable customer-attempt ledger, bounded backoff, recovery and reconciliation for ambiguous Shopify outcomes, and a resumable bulk runner with progress and final-count reporting.
-3. Package and deploy the customer-sync task using the existing private network; validate configuration, health/logging and failure handling without making the database public.
-4. Execute a read-only synchronization verification against checksum-verified Silver v1 before authorizing Shopify writes.
-5. Explicitly approve one Shopify customer create/find/retry integration test; verify whether `customerSet(identifier: ..., input: {})` is accepted for an ID-only historical customer. Never invent email addresses or consent.
-6. Only after the integration tests pass, run bounded synchronization for all 5,942 canonical Silver customers and reconcile persisted Shopify-returned GIDs with zero mapping conflicts.
+## Implementation components
 
-## Existing developer checks
+- Shopify OAuth client-credentials token acquisition/renewal, canonical-ID lookup and verified mutation read-back.
+- Versioned PostgreSQL identity and ledger/lease migrations; exclusive per-identity leases for safe restart.
+- Docker build definitions and guarded PowerShell image-publication/ECS-execution scripts in `scripts/aws/`.
+- S3 source-lineage, audit, and explicit approved-catalog safeguards.
+- Initial webhook HMAC/inbox/outbox, event publisher and SQS-to-S3 consumer code with offline tests. **These do not establish deployed end-to-end webhook ingestion.**
+
+## Engineering checks
 
 From the repository root:
 
 ```powershell
 python -m pip install -e ".[shopify,postgres,historical,aws,dev]"
-python -m pytest tests/unit/test_shopify_customer_sync.py -q
+ruff check src apps tests
+python -m pytest -q tests/unit
 ```
 
-The current `scripts/sync_historical_customers.py` entrypoint is read-only by default and permits at most five writes when explicitly enabled. It expects `SHOPIFY_SHOP_DOMAIN`, `SHOPIFY_ADMIN_TOKEN` and `ECOMMERCE_DATABASE_URL`, and a reachable PostgreSQL database. Do not run it as a local-to-private-RDS connection workflow; it needs AWS task packaging and a deployed schema first. Never store or publish credentials in GitHub or logs.
+Deployment instructions and operational evidence belong in the existing Notion E-Commerce Engineering Runbook. GitHub includes source code and repeatable CLI scripts, not a second copy of the run history.
 
-**Safety boundary:** PostgreSQL transactions cannot atomically commit a remote Shopify operation. Durable attempt tracking plus read-back reconciliation is required to make retries safe across that boundary. Silver v1 remains immutable.
+**Safety boundaries:** Shopify writes require explicit operator authorization. PostgreSQL and Shopify do not share an atomic transaction; remote read-back, durable identity mapping, leases and fail-closed conflict checks protect retries. Historical Bronze/Silver source records remain immutable. Keep credentials, local datasets, Terraform state, and saved plans out of Git.
