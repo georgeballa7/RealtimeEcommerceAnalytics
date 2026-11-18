@@ -56,8 +56,15 @@ if ($td.status -ne 'ACTIVE' -or $td.family -ne "$($work.task_family)") {
 }
 $container = @($td.containerDefinitions | Where-Object { $_.name -eq "$($work.container)" })
 if ($container.Count -ne 1) { throw 'Expected application container is missing.' }
-if ("$($container[0].image)" -notmatch '@sha256:[a-f0-9]{64}
-
+$imageRef = [string]$container[0].image
+$imageParts = $imageRef.Split('@')
+if ($imageParts.Count -ne 2 -or -not $imageParts[1].StartsWith('sha256:')) {
+    throw 'ECS task image must be pinned to an immutable registry digest.'
+}
+$imageHash = $imageParts[1].Substring(7)
+if ($imageHash.Length -ne 64 -or $imageHash -notmatch '^[0-9a-f]+') {
+    throw 'Expected a lowercase SHA-256 registry image digest.'
+}
 if ($Workload -eq 'catalog_sync' -and $AllowWrites) {
     if (-not $ApprovalKey -or -not $ApprovalSha256) {
         throw 'Catalog writes require a reviewed S3 approval manifest key and SHA-256.'
