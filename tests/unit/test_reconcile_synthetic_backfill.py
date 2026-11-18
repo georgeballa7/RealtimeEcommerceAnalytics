@@ -55,7 +55,7 @@ class FakeS3:
 def make_sample():
     s3 = FakeS3()
     # Isolated catalog fixture with its own pinned SHA.
-    catalog = b'{"schema_version":"catalog-approval-v1","approved_stock_codes":["A"]}\\n'
+    catalog = b'{"schema_version":"catalog-approval-v1","approved_stock_codes":["A"]}\n'
     import hashlib
 
     s3.objects[APPROVAL] = catalog
