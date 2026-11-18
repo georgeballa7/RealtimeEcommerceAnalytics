@@ -47,6 +47,28 @@ def test_uses_invoice_basket_grain_and_includes_all_customers():
     assert report["approved_positive_orders"] == 3
     assert report["approved_positive_lines"] == 4
     assert report["cancelled_source_lines"] == 1
+    assert report["schema_version"] == "historical-behavior-calibration-v2"
+    assert report["source_orders_with_cancellation_lines"] == 1
+    assert report["source_orders_without_cancellation_lines"] == 2
+    assert report["approved_positive_orders_with_cancellation_lines"] == 1
+    assert report["customer_order_count_percentiles"] == {
+        "p50": 1, "p90": 2, "p95": 2, "p99": 2
+    }
+    assert report["basket_line_count_percentiles"] == {
+        "p50": 1, "p90": 2, "p95": 2, "p99": 2
+    }
+    assert report["basket_unit_count_percentiles"] == {
+        "p50": 3, "p90": 5, "p95": 5, "p99": 5
+    }
+    assert report["observation_start_source_date"] == "2010-01-05"
+    assert report["observation_end_source_date_inclusive"] == "2010-02-09"
+    assert report["observation_calendar_days"] == 36
+    assert report["month_exposure_days"] == {"2010-01": 27, "2010-02": 9}
+    assert report["monthly_orders_per_exposure_day"]["2010-01"] == {
+        "orders": 1, "exposure_days": 27
+    }
+    assert report["weekday_orders_per_exposure_day"]["0"]["orders"] == 1
+    assert report["weekday_orders_per_exposure_day"]["0"]["exposure_days"] == 5
     assert report["customer_order_count_histogram"] == {"0": 1, "1": 1, "2": 1}
     assert report["basket_line_count_histogram"] == {"1": 2, "2": 1}
     assert report["basket_unit_count_histogram"] == {"2": 1, "3": 1, "5": 1}
@@ -96,3 +118,20 @@ def test_fails_closed_on_missing_approval_and_invalid_positive_quantity():
     data["order_items"].loc[0, "quantity"] = 0
     with pytest.raises(ValueError, match="positive quantity"):
         run(data)
+
+def test_no_eligible_orders_fails_with_clear_statistical_precondition():
+    with pytest.raises(ValueError, match="empty population"):
+        calibrate_historical_behavior(
+            silver(), approved_stock_codes=frozenset({"UNUSED"}), source_sha256="a" * 64
+        )
+
+
+def test_calendar_exposure_uses_all_source_orders_not_only_approved():
+    report = calibrate_historical_behavior(
+        silver(), approved_stock_codes=frozenset({"A"}), source_sha256="a" * 64
+    )
+    assert report["observation_calendar_days"] == 36
+    assert report["month_exposure_days"]["2010-02"] == 9
+    assert report["monthly_orders_per_exposure_day"]["2010-02"] == {
+        "orders": 0, "exposure_days": 9
+    }
