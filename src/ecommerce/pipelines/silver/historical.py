@@ -5,11 +5,11 @@ Rejected records and cross-sheet copies remain traceable in separate outputs.
 """
 from __future__ import annotations
 
+import io
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from hashlib import sha256
-import io
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -17,8 +17,12 @@ from typing import Any
 import pandas as pd
 
 from ecommerce.domain.identifiers import (
-    UCI_SOURCE, canonical_id, historical_customer_id,
-    historical_order_id, historical_order_item_id, historical_product_id,
+    UCI_SOURCE,
+    canonical_id,
+    historical_customer_id,
+    historical_order_id,
+    historical_order_item_id,
+    historical_product_id,
 )
 
 SILVER_VERSION = "online-retail-ii-silver-v1"
