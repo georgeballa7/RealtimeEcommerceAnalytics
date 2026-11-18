@@ -179,7 +179,35 @@ class ShopifyGraphQLClient:
             if not isinstance(body, dict):
                 raise ShopifyError("Malformed Shopify JSON")
             if body.get("errors"):
-                raise ShopifyError("Shopify GraphQL errors; check permissions and request schema")
+                # GraphQL errors can include a customer UUID or user-supplied
+                # values in message text. Restrict diagnostics to safe error
+                # codes and schema field/type tokens; never log raw messages.
+                details = []
+                for error in body["errors"][:5] if isinstance(body["errors"], list) else []:
+                    if not isinstance(error, dict):
+                        details.append("UNKNOWN")
+                        continue
+                    extensions = error.get("extensions")
+                    code = extensions.get("code") if isinstance(extensions, dict) else None
+                    safe_code = (code if isinstance(code, str)
+                                 and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code)
+                                 else "UNKNOWN")
+                    message = error.get("message")
+                    # Standard schema validation messages cite a field/type.
+                    # Do not include any other message text or variable values.
+                    schema = None
+                    if isinstance(message, str):
+                        match = re.search(
+                            r"(?:Field|field) '([A-Za-z_][A-Za-z0-9_]{0,63})' "
+                            r"(?:doesn't exist|is not defined) on type "
+                            r"'([A-Za-z_][A-Za-z0-9_]{0,63})'", message
+                        )
+                        if match:
+                            schema = f"{match.group(2)}.{match.group(1)}"
+                    details.append(f"{safe_code}@{schema}" if schema else safe_code)
+                raise ShopifyError(
+                    "Shopify GraphQL errors: " + (", ".join(details) if details else "UNKNOWN")
+                )
             if not isinstance(body.get("data"), dict):
                 raise ShopifyError("Missing GraphQL data")
             return body["data"]
