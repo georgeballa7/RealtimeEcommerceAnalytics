@@ -1,0 +1,20 @@
+{
+  "account_id": "825414820081",
+  "region": "eu-central-1",
+  "profile": "ecommerce-admin",
+  "cluster": "ecommerce-demo",
+  "landing_bucket": "ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6",
+  "customer_sync": {
+    "repository": "ecommerce-customer-sync-demo",
+    "dockerfile": "Dockerfile.customer-sync",
+    "task_family": "ecommerce-customer-sync-demo",
+    "container": "customer-sync",
+    "log_group": "/ecs/ecommerce-demo/customer-sync",
+    "subnets": [
+      "subnet-0248e35f98ea3fbf6",
+      "subnet-0481cb476d153d5ba"
+    ],
+    "security_groups": ["sg-0128bc9b086b7072b"],
+    "expected_customer_count": 5942
+  }
+}
