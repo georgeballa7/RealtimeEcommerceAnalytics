@@ -6,6 +6,7 @@ No automatically approved Shopify products are returned.
 from __future__ import annotations
 
 from collections import Counter
+from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 
@@ -34,7 +35,7 @@ def catalog_review(tables: dict[str, pd.DataFrame], bronze: pd.DataFrame) -> dic
     }
     source = bronze[["StockCode", "Description"]].copy()
     source = source.loc[source["StockCode"].notna()]
-    source["stock_code"] = source["StockCode"].astype(str)
+    source["stock_code"] = source["StockCode"].astype(str).str.strip()
     source["normalized_description"] = (
         source["Description"].astype("string").str.strip().str.upper()
     )
@@ -44,11 +45,16 @@ def catalog_review(tables: dict[str, pd.DataFrame], bronze: pd.DataFrame) -> dic
     ambiguous = set(counts[counts > 1].index.astype(str))
 
     item_codes = items["source_stock_code"].astype("string")
+    def is_zero(value: object) -> bool:
+        if pd.isna(value):
+            return False
+        try:
+            return Decimal(str(value)) == 0
+        except (InvalidOperation, ValueError, TypeError):
+            raise ValueError("Invalid historical unit price") from None
+
     zero_price = set(
-        item_codes.loc[
-            items["unit_price"].notna()
-            & items["unit_price"].map(lambda v: str(v) in {"0", "0.0", "0.00"})
-        ].dropna().astype(str)
+        item_codes.loc[items["unit_price"].map(is_zero)].dropna().astype(str)
     )
     positive_sale = set(
         item_codes.loc[items["is_positive_sale"].fillna(False)]
