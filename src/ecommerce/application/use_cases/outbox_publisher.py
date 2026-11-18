@@ -36,41 +36,39 @@ class PostgresOutbox:
         if lease_seconds < 15:
             raise ValueError("Lease must be at least 15 seconds")
         token = str(uuid4())
-        with self.connection_factory() as connection:
-            with connection.transaction():
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        WITH candidate AS (
-                          SELECT id FROM shopify_webhook_outbox
-                          WHERE (status = 'pending' AND next_attempt_at <= now())
-                             OR (status = 'publishing' AND lease_until < now())
-                          ORDER BY id
-                          FOR UPDATE SKIP LOCKED LIMIT 1
-                        )
-                        UPDATE shopify_webhook_outbox AS o
-                        SET status = 'publishing', claim_token = %s,
-                            lease_until = now() + (%s * INTERVAL '1 second'),
-                            attempts = attempts + 1
-                        FROM candidate
-                        WHERE o.id = candidate.id
-                        RETURNING o.id, o.inbox_id
-                        """,
-                        (token, lease_seconds),
-                    )
-                    claimed = cursor.fetchone()
-                    if claimed is None:
-                        return None
-                    cursor.execute(
-                        """
-                        SELECT webhook_id, shop_domain, topic, event_id, payload
-                        FROM shopify_webhook_inbox WHERE id = %s
-                        """,
-                        (claimed[1],),
-                    )
-                    webhook = cursor.fetchone()
-                    if webhook is None:
-                        raise RuntimeError("Outbox record has no inbox row")
+        with self.connection_factory() as connection, connection.transaction(), connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH candidate AS (
+                  SELECT id FROM shopify_webhook_outbox
+                  WHERE (status = 'pending' AND next_attempt_at <= now())
+                     OR (status = 'publishing' AND lease_until < now())
+                  ORDER BY id
+                  FOR UPDATE SKIP LOCKED LIMIT 1
+                )
+                UPDATE shopify_webhook_outbox AS o
+                SET status = 'publishing', claim_token = %s,
+                    lease_until = now() + (%s * INTERVAL '1 second'),
+                    attempts = attempts + 1
+                FROM candidate
+                WHERE o.id = candidate.id
+                RETURNING o.id, o.inbox_id
+                """,
+                (token, lease_seconds),
+            )
+            claimed = cursor.fetchone()
+            if claimed is None:
+                return None
+            cursor.execute(
+                """
+                SELECT webhook_id, shop_domain, topic, event_id, payload
+                FROM shopify_webhook_inbox WHERE id = %s
+                """,
+                (claimed[1],),
+            )
+            webhook = cursor.fetchone()
+            if webhook is None:
+                raise RuntimeError("Outbox record has no inbox row")
         return ClaimedEvent(
             outbox_id=claimed[0], webhook_id=webhook[0],
             shop_domain=webhook[1], topic=webhook[2],
@@ -78,42 +76,38 @@ class PostgresOutbox:
         )
 
     def mark_published(self, event: ClaimedEvent) -> bool:
-        with self.connection_factory() as connection:
-            with connection.transaction():
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        UPDATE shopify_webhook_outbox
-                        SET status = 'published', published_at = now(),
-                            lease_until = NULL, claim_token = NULL, last_error = NULL
-                        WHERE id = %s AND status = 'publishing'
-                          AND claim_token = %s AND lease_until > now()
-                        RETURNING id
-                        """,
-                        (event.outbox_id, event.claim_token),
-                    )
-                    return cursor.fetchone() is not None
+        with self.connection_factory() as connection, connection.transaction(), connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE shopify_webhook_outbox
+                SET status = 'published', published_at = now(),
+                    lease_until = NULL, claim_token = NULL, last_error = NULL
+                WHERE id = %s AND status = 'publishing'
+                  AND claim_token = %s AND lease_until > now()
+                RETURNING id
+                """,
+                (event.outbox_id, event.claim_token),
+            )
+            return cursor.fetchone() is not None
 
     def schedule_retry(self, event: ClaimedEvent, *, delay_seconds: int = 30) -> bool:
         if delay_seconds < 1:
             raise ValueError("Retry delay must be positive")
-        with self.connection_factory() as connection:
-            with connection.transaction():
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        UPDATE shopify_webhook_outbox
-                        SET status = 'pending', claim_token = NULL,
-                            lease_until = NULL,
-                            next_attempt_at = now() + (%s * INTERVAL '1 second'),
-                            last_error = 'SQS delivery failed; retry scheduled'
-                        WHERE id = %s AND status = 'publishing'
-                          AND claim_token = %s
-                        RETURNING id
-                        """,
-                        (delay_seconds, event.outbox_id, event.claim_token),
-                    )
-                    return cursor.fetchone() is not None
+        with self.connection_factory() as connection, connection.transaction(), connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE shopify_webhook_outbox
+                SET status = 'pending', claim_token = NULL,
+                    lease_until = NULL,
+                    next_attempt_at = now() + (%s * INTERVAL '1 second'),
+                    last_error = 'SQS delivery failed; retry scheduled'
+                WHERE id = %s AND status = 'publishing'
+                  AND claim_token = %s
+                RETURNING id
+                """,
+                (delay_seconds, event.outbox_id, event.claim_token),
+            )
+            return cursor.fetchone() is not None
 
 
 class SqsOutboxPublisher:
@@ -149,7 +143,7 @@ class SqsOutboxPublisher:
                     'topic': {'DataType': 'String', 'StringValue': event.topic},
                 },
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - catch SDK failures and schedule retry
             # Return the event to pending; callers must never treat it as sent.
             # Do not log exception details: SDK exceptions may contain sensitive data.
             LOGGER.warning('Outbox SQS publish failed for id=%s', event.outbox_id)
