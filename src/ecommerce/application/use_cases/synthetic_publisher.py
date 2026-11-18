@@ -86,6 +86,7 @@ def publish_synthetic_interval(
     cutoff_utc: datetime,
     orders: list[dict],
     items: list[dict],
+    cancellations: list[dict],
     policy_sha256: str,
     calibration_sha256: str,
     source_bronze_sha256: str,
@@ -115,6 +116,24 @@ def publish_synthetic_interval(
         for order in orders
     ):
         raise ValueError("Order outside its declared UTC interval")
+    cancellation_ids = [event["event_id"] for event in cancellations]
+    if len(cancellation_ids) != len(set(cancellation_ids)):
+        raise ValueError("Duplicate cancellation event IDs")
+    if any(
+        not start_utc <= datetime.fromisoformat(event["event_time_utc"]) < cutoff_utc
+        for event in cancellations
+    ):
+        raise ValueError("Cancellation outside declared UTC interval")
+    if any(
+        datetime.fromisoformat(event["original_order_time_utc"])
+        >= datetime.fromisoformat(event["event_time_utc"])
+        or event["event_type"] != "order_item_cancelled"
+        or event["cancelled_quantity"] <= 0
+        or not event.get("order_id")
+        or not event.get("order_item_id")
+        for event in cancellations
+    ):
+        raise ValueError("Invalid cancellation linkage or quantity")
     known_orders = set(ids)
     if any(item["order_id"] not in known_orders for item in items):
         raise ValueError("Orphan synthetic order item")
@@ -155,6 +174,7 @@ def publish_synthetic_interval(
     rows = {
         "orders": (orders, f"{base}/orders.jsonl.gz"),
         "order_items": (items, f"{base}/order_items.jsonl.gz"),
+        "cancellations": (cancellations, f"{base}/cancellations.jsonl.gz"),
     }
     assets = {}
     for name, (records, key) in rows.items():
@@ -165,7 +185,7 @@ def publish_synthetic_interval(
             "sha256": _put_immutable(s3, bucket, key, raw, "application/gzip"),
         }
     manifest = {
-        "schema_version": "synthetic-2026-backfill-manifest-v1",
+        "schema_version": "synthetic-2026-backfill-manifest-v2",
         "start_utc": start,
         "cutoff_utc": cutoff,
         "prior_manifest_key": prior_head["manifest_key"] if prior_head else None,
