@@ -6,7 +6,10 @@ import pytest
 from botocore.exceptions import ClientError
 
 from ecommerce.application.use_cases.sqs_event_landing import (
-    ConflictingReplay, InvalidEvent, SqsToS3LandingConsumer, WebhookEnvelope,
+    ConflictingReplay,
+    InvalidEvent,
+    SqsToS3LandingConsumer,
+    WebhookEnvelope,
 )
 
 
