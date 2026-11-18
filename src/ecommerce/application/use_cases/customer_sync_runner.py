@@ -6,10 +6,10 @@ records and manages progress summaries.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-import json
 from uuid import UUID, uuid4
 
 from ecommerce.application.use_cases.shopify_customer_sync import (
