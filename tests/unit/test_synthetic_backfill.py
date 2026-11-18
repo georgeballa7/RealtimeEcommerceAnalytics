@@ -69,9 +69,9 @@ def generate(start, end, policy=None, tables=None):
 def test_repeatable_and_half_open_utc_bounds():
     start = datetime(2026, 1, 1, tzinfo=UTC)
     end = start + timedelta(days=3)
-    orders, items = generate(start, end)
+    orders, items, cancellations = generate(start, end)
     assert orders
-    assert (orders, items) == generate(start, end)
+    assert (orders, items, cancellations) == generate(start, end)
     assert len({order["order_id"] for order in orders}) == len(orders)
     assert len({line["order_item_id"] for line in items}) == len(items)
     assert {line["order_id"] for line in items} == {
@@ -80,17 +80,19 @@ def test_repeatable_and_half_open_utc_bounds():
     assert all(start <= datetime.fromisoformat(o["event_time_utc"]) < end for o in orders)
     assert all(o["synthetic"] and o["currency"] == "EUR" for o in orders)
     assert all(line["source_stock_code"] in {"A", "B"} for line in items)
+    assert all(c["synthetic"] and c["event_type"] == "order_item_cancelled" for c in cancellations)
 
 
 def test_cutoff_midday_and_contiguous_restart_preserve_exact_content():
     start = datetime(2026, 1, 1, tzinfo=UTC)
     middle = start + timedelta(days=1, hours=12)
     end = start + timedelta(days=3, hours=14)
-    whole_orders, whole_items = generate(start, end)
-    first_orders, first_items = generate(start, middle)
-    later_orders, later_items = generate(middle, end)
+    whole_orders, whole_items, whole_cancel = generate(start, end)
+    first_orders, first_items, first_cancel = generate(start, middle)
+    later_orders, later_items, later_cancel = generate(middle, end)
     assert first_orders + later_orders == whole_orders
     assert first_items + later_items == whole_items
+    assert first_cancel + later_cancel == whole_cancel
     assert len({o["event_id"] for o in whole_orders}) == len(whole_orders)
 
 
@@ -109,7 +111,7 @@ def test_bounded_basket_quantities_and_explicit_modes():
         target_orders_per_day=85, retail_probability_percent=100,
         retail_units_per_line_cap=3, retail_line_cap=1,
     )
-    orders, items = generate(start, end, policy=retail)
+    orders, items, _cancellations = generate(start, end, policy=retail)
     assert all(o["basket_mode"] == "retail_bounded" for o in orders)
     assert len(items) == len(orders)
     assert all(1 <= item["quantity"] <= 3 for item in items)
@@ -129,3 +131,25 @@ def test_fail_closed_on_naive_cutoff_and_unapproved_catalog():
         )
     with pytest.raises(ValueError, match="Invalid explicit"):
         SimulationPolicy(target_orders_per_day=0)
+
+
+def test_cancellations_link_to_earlier_orders_and_valid_items():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = start + timedelta(days=20)
+    policy = SimulationPolicy(
+        target_orders_per_day=85, cancellation_probability_percent=100,
+        cancellation_delay_max_days=3,
+    )
+    orders, items, cancellations = generate(start, end, policy=policy)
+    assert cancellations
+    by_order = {order["order_id"]: order for order in orders}
+    by_item = {item["order_item_id"]: item for item in items}
+    for event in cancellations:
+        assert event["order_id"] in by_order
+        assert event["order_item_id"] in by_item
+        assert by_item[event["order_item_id"]]["order_id"] == event["order_id"]
+        assert 1 <= event["cancelled_quantity"] <= by_item[event["order_item_id"]]["quantity"]
+        assert datetime.fromisoformat(event["original_order_time_utc"]) < datetime.fromisoformat(
+            event["event_time_utc"]
+        )
+        assert event["provenance"] == "simulated_cancellation_not_verified_refund"
