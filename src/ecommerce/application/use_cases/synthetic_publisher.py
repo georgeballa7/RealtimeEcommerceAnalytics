@@ -110,9 +110,13 @@ def publish_synthetic_interval(
     ids = [order["order_id"] for order in orders]
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate synthetic order IDs")
-    if any(not start <= order["event_time_utc"].replace("+00:00", "Z") < cutoff for order in orders):
+    if any(
+        not start_utc <= datetime.fromisoformat(order["event_time_utc"]) < cutoff_utc
+        for order in orders
+    ):
         raise ValueError("Order outside its declared UTC interval")
-    if any(item["order_id"] not in set(ids) for item in items):
+    known_orders = set(ids)
+    if any(item["order_id"] not in known_orders for item in items):
         raise ValueError("Orphan synthetic order item")
     if len({item["order_item_id"] for item in items}) != len(items):
         raise ValueError("Duplicate synthetic item IDs")
