@@ -83,7 +83,7 @@ if ($Workload -eq 'customer_sync') {
     $cmd += @('--batch-size', "$BatchSize")
     if ($AllowWrites) { $cmd += '--allow-customer-writes' }
 } else {
-    $cmd += @('--approval-key', $ApprovalKey, '--approval-sha256', $ApprovalSha256)
+    $cmd += @('--batch-size', "$BatchSize", '--approval-key', $ApprovalKey, '--approval-sha256', $ApprovalSha256)
     if ($AllowWrites) { $cmd += '--allow-catalog-writes' }
 }
 Write-Host "AWS account: $account"
@@ -92,7 +92,7 @@ Write-Host "Task definition: $($td.taskDefinitionArn)"
 Write-Host "Pinned task image: $($container[0].image)"
 Write-Host "Private subnets: $($work.subnets -join ', ')"
 Write-Host "Source: $($config.landing_bucket)"
-Write-Host "Workload: $Workload | selected limit: $Limit | writes enabled: $AllowWrites"
+Write-Host "Workload: $Workload | selected limit: $Limit | batch size: $BatchSize | writes enabled: $AllowWrites"
 if (-not $Execute) { Write-Host 'PREVIEW ONLY: add -Execute to launch exactly one task.'; return }
 
 foreach ($status in @('PENDING', 'RUNNING')) {
