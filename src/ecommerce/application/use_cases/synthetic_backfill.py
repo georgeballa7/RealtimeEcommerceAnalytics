@@ -6,7 +6,6 @@ of invocation cutoff or the size of the requested backfill interval.
 """
 from __future__ import annotations
 
-import bisect
 import hashlib
 import json
 import math
@@ -239,9 +238,11 @@ def generate_interval(
         for event, sequence in sorted(daily):
             if not start_utc <= event < cutoff_utc:
                 continue
-            customer = _choose(rng, customers, customer_weights)
-            template = templates[rng.randrange(len(templates))]
-            is_retail = rng.randrange(100) < policy.retail_probability_percent
+            # Per-order streams ensure interval slicing cannot change content.
+            item_rng = random.Random(_seed(policy.fingerprint, day.isoformat(), sequence))
+            customer = _choose(item_rng, customers, customer_weights)
+            template = templates[item_rng.randrange(len(templates))]
+            is_retail = item_rng.randrange(100) < policy.retail_probability_percent
             mode = "retail_bounded" if is_retail else "wholesale_tail"
             max_lines = policy.retail_line_cap if is_retail else policy.wholesale_line_cap
             max_units = (
