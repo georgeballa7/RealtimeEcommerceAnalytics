@@ -42,6 +42,15 @@ def fixture():
     calibration = calibrate_historical_behavior(
         tables, approved_stock_codes=approved, source_sha256="a" * 64
     )
+    # Isolate generator invariants from seasonality: tiny fixture lacks the
+    # 12-month/7-weekday exposure of the verified production source.
+    calibration["monthly_orders_per_exposure_day"] = {
+        f"2010-{month:02d}": {"orders": 1, "exposure_days": 1}
+        for month in range(1, 13)
+    }
+    calibration["weekday_orders_per_exposure_day"] = {
+        str(day): {"orders": 1, "exposure_days": 1} for day in range(7)
+    }
     return tables, calibration, approved
 
 
