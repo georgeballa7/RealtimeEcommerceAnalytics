@@ -105,4 +105,4 @@ def manifest_from_audit(report: dict) -> bytes:
         "schema_version": "catalog-approval-v1",
         "approved_stock_codes": sorted(codes),
     }
-    return (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\\n").encode("utf-8")
+    return json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
