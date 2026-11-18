@@ -28,7 +28,7 @@ class CatalogSelection:
 
 def _uuid(value: object, field: str) -> str:
     if not isinstance(value, str):
-        raise ValueError(f"Invalid {field}")
+        raise TypeError(f"Invalid {field} type")
     try:
         valid = str(UUID(value)) == value
     except (TypeError, ValueError, AttributeError):
