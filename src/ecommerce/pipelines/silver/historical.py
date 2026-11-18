@@ -258,7 +258,7 @@ def publish_silver(
             digest = _sha256_bytes(path.read_bytes())
             s3.upload_file(str(path), bucket, key, ExtraArgs={"Metadata": {"sha256": digest}})
             if _sha256_bytes(_read_object(s3, bucket, key)) != digest:
-                raise IOError(f"Silver remote checksum mismatch: {key}")
+                raise OSError(f"Silver remote checksum mismatch: {key}")
             output.append({"key": key, "rows": rows, "sha256": digest})
         manifest = {
             "schema_version": SILVER_VERSION,
@@ -271,5 +271,5 @@ def publish_silver(
         s3.put_object(Bucket=bucket, Key=f"{prefix}/manifest.json", Body=marker,
                       ContentType="application/json", IfNoneMatch="*")
         if _read_object(s3, bucket, f"{prefix}/manifest.json") != marker:
-            raise IOError("Silver manifest verification failed")
+            raise OSError("Silver manifest verification failed")
         return manifest
