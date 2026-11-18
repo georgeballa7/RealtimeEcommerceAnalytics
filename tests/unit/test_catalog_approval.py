@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from ecommerce.application.use_cases.catalog_selection import CatalogCandidate
 from ecommerce.application.use_cases.catalog_approval import approved_catalog, selected_catalog
+from ecommerce.application.use_cases.catalog_selection import CatalogCandidate
 
 
 class S3:
