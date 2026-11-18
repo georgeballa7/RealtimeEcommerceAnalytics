@@ -1,5 +1,6 @@
 """Offline invariants for deterministic synthetic 2026 orders."""
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pandas as pd
 import pytest
@@ -26,6 +27,7 @@ def fixture():
             "source_stock_code": ["A", "B", "A", "B"],
             "product_id": ["pa", "pb", "pa", "pb"],
             "quantity": [1, 500, 2, 6],
+            "unit_price": ["2.20", "3.40", "4.20", "3.60"],
             "is_positive_sale": [True, True, True, True],
             "is_cancellation": [False, False, False, False],
         }),
@@ -78,7 +80,7 @@ def test_repeatable_and_half_open_utc_bounds():
         order["order_id"] for order in orders
     }
     assert all(start <= datetime.fromisoformat(o["event_time_utc"]) < end for o in orders)
-    assert all(o["synthetic"] and o["currency"] == "EUR" for o in orders)
+    assert all(o["synthetic"] and o["currency"] == "GBP" for o in orders)
     assert all(line["source_stock_code"] in {"A", "B"} for line in items)
     assert all(c["synthetic"] and c["event_type"] == "order_item_cancelled" for c in cancellations)
 
@@ -153,3 +155,17 @@ def test_cancellations_link_to_earlier_orders_and_valid_items():
             event["event_time_utc"]
         )
         assert event["provenance"] == "simulated_cancellation_not_verified_refund"
+        assert event["currency"] == "GBP"
+        assert Decimal(event["cancelled_amount"]) == Decimal(event["unit_price"]) * event["cancelled_quantity"]
+
+
+def test_gbp_prices_follow_approved_source_sku_medians():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    orders, items, _ = generate(start, start + timedelta(days=3))
+    assert orders and items
+    expected = {"A": "3.20", "B": "3.50"}
+    for line in items:
+        assert line["currency"] == "GBP"
+        assert line["unit_price"] == expected[line["source_stock_code"]]
+        assert line["currency_assumption"] == "GBP_assumed_from_UK_source_not_verified"
+        assert Decimal(line["line_amount"]) == Decimal(line["unit_price"]) * line["quantity"]
