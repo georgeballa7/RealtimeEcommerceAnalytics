@@ -111,7 +111,7 @@ def calibrate_historical_behavior(
         },
         "weekday_order_counts": {
             str(day): int(count)
-            for day, count in sorted(Counter(timestamp_lookup.dt.dayofweek).items())
+            for day, count in sorted(Counter(timestamp_lookup.dt.day_of_week).items())
         },
         "hour_order_counts": {
             str(hour): int(count)
