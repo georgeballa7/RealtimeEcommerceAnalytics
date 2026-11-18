@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from ecommerce.application.use_cases.catalog_selection import CatalogCandidate
-from scripts.sync_historical_catalog import approved_catalog, selected_catalog
+from ecommerce.application.use_cases.catalog_approval import approved_catalog, selected_catalog
 
 
 class S3:
