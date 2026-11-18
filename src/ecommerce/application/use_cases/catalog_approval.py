@@ -80,14 +80,14 @@ def manifest_from_audit(report: dict) -> bytes:
     flagged = 0
     for row in rows:
         if not isinstance(row, dict):
-            raise ValueError("Malformed catalog review row")
+            raise TypeError("Malformed catalog review row")
         code = row.get("stock_code")
         reasons = row.get("review_reasons")
         needs_review = row.get("needs_manual_review")
         if not isinstance(code, str) or not code or code.strip() != code:
             raise ValueError("Invalid catalog stock code")
         if not isinstance(reasons, list) or not isinstance(needs_review, bool):
-            raise ValueError("Missing catalog review reasons")
+            raise TypeError("Missing catalog review reasons")
         if needs_review != bool(reasons):
             raise ValueError("Conflicting catalog audit flags")
         if needs_review:
@@ -95,7 +95,7 @@ def manifest_from_audit(report: dict) -> bytes:
         else:
             codes.append(code)
     if (
-        len(set(row["stock_code"] for row in rows)) != len(rows)
+        len({row["stock_code"] for row in rows}) != len(rows)
         or flagged != report.get("manual_review_required")
         or len(codes) != report.get("without_detected_flags")
         or not codes
