@@ -78,15 +78,15 @@ def test_partially_coverable_return_and_cross_customer_isolation():
     tables["order_items"] = pd.DataFrame([
         {"order_item_id": "p", "source_record_key": "p", "order_id": "s1",
          "source_stock_code": "12345", "order_timestamp": pd.Timestamp("2010-01-01"),
-         "quantity": 2, "unit_price": Decimal("3"), "is_cancellation": False,
+         "quantity": 2, "unit_price": Decimal(3), "is_cancellation": False,
          "item_class": "merchandise_candidate"},
         {"order_item_id": "q", "source_record_key": "q", "order_id": "s3",
          "source_stock_code": "12345", "order_timestamp": pd.Timestamp("2010-01-01"),
-         "quantity": 10, "unit_price": Decimal("3"), "is_cancellation": False,
+         "quantity": 10, "unit_price": Decimal(3), "is_cancellation": False,
          "item_class": "merchandise_candidate"},
         {"order_item_id": "r", "source_record_key": "r", "order_id": "s2",
          "source_stock_code": "12345", "order_timestamp": pd.Timestamp("2010-01-02"),
-         "quantity": -3, "unit_price": Decimal("3"), "is_cancellation": True,
+         "quantity": -3, "unit_price": Decimal(3), "is_cancellation": True,
          "item_class": "merchandise_candidate"},
     ])
     simulation = review_business_rules(tables, bronze)["cancellation_allocation_simulation"]
