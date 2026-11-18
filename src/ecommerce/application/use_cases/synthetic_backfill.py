@@ -353,7 +353,8 @@ def generate_interval(
                     cancelled_line = lines[cancel_rng.randrange(len(lines))]
                     cancelled_units = 1 + cancel_rng.randrange(cancelled_line["quantity"])
                     cancellation_key = f"{source_order_key}:cancellation"
-                    cancelled_amount = (\n                        Decimal(cancelled_line["unit_price"]) * cancelled_units\n                    ).quantize(PENNY)\n                    cancellations_out.append({
+                    cancelled_amount = (Decimal(cancelled_line["unit_price"]) * cancelled_units).quantize(PENNY)
+                    cancellations_out.append({
                         "event_id": canonical_id("event", SYNTHETIC_SOURCE, cancellation_key),
                         "event_type": "order_item_cancelled",
                         "order_id": order_id,
