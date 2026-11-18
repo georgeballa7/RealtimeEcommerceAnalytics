@@ -93,7 +93,8 @@ def test_read_only_report_does_not_write():
     assert report.verified_new == 0
     assert api.writes == 0
     assert report.verified_in_database == 0
-    assert lines[-1] == "Verified mappings in PostgreSQL: 0/3"
+    assert lines[-2] == "Verified mappings in PostgreSQL: 0/3"
+    assert lines[-1].startswith("CustomerSyncReport: ")
 
 
 def test_write_then_reconcile_without_recreating():
