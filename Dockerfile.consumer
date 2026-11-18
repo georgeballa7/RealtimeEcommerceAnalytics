@@ -1,0 +1,10 @@
+# Build from repository root. Existing Terraform consumer task uses this entrypoint.
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 AWS_DEFAULT_REGION=eu-central-1
+WORKDIR /opt/app
+COPY pyproject.toml ./
+COPY src/ ./src/
+RUN pip install --no-cache-dir ".[aws]" \
+    && useradd --system --uid 10001 ecommerce
+USER ecommerce
+ENTRYPOINT ["python", "-m", "ecommerce.interfaces.workers.sqs_to_s3"]
