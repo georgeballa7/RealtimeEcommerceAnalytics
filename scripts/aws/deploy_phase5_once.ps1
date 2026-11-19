@@ -133,6 +133,250 @@ try {
                 Assert-Exit "Resolve $kind ECR digest"
             }
             if ($digest -notmatch '^sha256:[a-f0-9]{64}
+            Remove-Variable token, auth, dockerCfg -ErrorAction SilentlyContinue
+            if ($tempConfig) {
+                Remove-Item -LiteralPath $tempConfig -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        $secretArn = (& aws secretsmanager describe-secret --secret-id $SecretId --profile $AwsProfile --region $Region --query ARN --output text).Trim()
+        Assert-Exit 'Shopify app secret lookup'
+        $vars = @(
+            "-var=aws_account_id=$account",
+            "-var=aws_profile=$AwsProfile",
+            "-var=aws_region=$Region",
+            "-var=shopify_shop_domain=$ShopDomain",
+            "-var=shopify_client_credentials_secret_arn=$secretArn",
+            "-var=shopify_webhook_secret_arn=$secretArn",
+            "-var=phase5_lambda_image=$($imageDigests['lambda'])",
+            "-var=phase5_projector_image=$($imageDigests['projector'])",
+            "-var=phase5_generator_image=$($imageDigests['generator'])",
+            "-var=phase5_lifecycle_image=$($imageDigests['lifecycle'])"
+        )
+        $planFile = Join-Path $root '.phase5-release.tfplan'
+        Write-Host '=== Review Terraform plan: Phase 5 enabled ==='
+        & terraform plan @vars "-out=$planFile"
+        Assert-Exit 'Terraform plan'
+        & terraform show $planFile
+        Assert-Exit 'Terraform plan display'
+        if (-not $ApprovePlan) {
+            $confirmation = Read-Host 'Review resources and costs. Type APPLY-PHASE5 to apply this saved plan'
+            if ($confirmation -cne 'APPLY-PHASE5') { throw 'Deployment stopped before Terraform apply' }
+        }
+        & terraform apply $planFile
+        Assert-Exit 'Terraform apply'
+        $schemaTask = (& terraform output -raw phase5_schema_task_definition).Trim()
+        Assert-Exit 'Schema task ARN'
+        $cluster = (& terraform output -raw ecs_cluster_name).Trim()
+        Assert-Exit 'ECS cluster ARN'
+        $subnets = @(& terraform output -json application_subnet_ids | ConvertFrom-Json)
+        Assert-Exit 'Application subnets'
+        $webhookUrl = (& terraform output -raw phase5_webhook_url).Trim()
+        Assert-Exit 'Webhook HTTPS endpoint'
+        $generatorDef = (& terraform output -raw phase5_generator_task_definition).Trim()
+        Assert-Exit 'Generator task definition'
+        $landingBucket = (& terraform output -raw landing_bucket_name).Trim()
+        Assert-Exit 'Landing bucket'
+        # The schema task uses the existing ECS API security group, with RDS access.
+        $ecsSg = (& terraform output -raw phase5_schema_security_group_id).Trim()
+        Assert-Exit 'Schema security group'
+    }
+    finally { Pop-Location }
+
+    Write-Host '=== Phase 5: migrate private RDS before opening webhook intake ==='
+    $dbStatus = (& aws rds describe-db-instances --db-instance-identifier ecommerce-postgres-dev --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AwsProfile --region $Region).Trim()
+    Assert-Exit 'RDS state'
+    if ($dbStatus -eq 'stopped') {
+        & aws rds start-db-instance --db-instance-identifier ecommerce-postgres-dev --profile $AwsProfile --region $Region | Out-Null
+        Assert-Exit 'RDS wake for migration'
+    }
+    & aws rds wait db-instance-available --db-instance-identifier ecommerce-postgres-dev --profile $AwsProfile --region $Region
+    Assert-Exit 'RDS available before migration'
+    $net = @{
+        awsvpcConfiguration = @{
+            subnets = @($subnets)
+            securityGroups = @($ecsSg)
+            assignPublicIp = 'DISABLED'
+        }
+    } | ConvertTo-Json -Depth 7 -Compress
+    $taskArn = (& aws ecs run-task --cluster $cluster --task-definition $schemaTask --launch-type FARGATE --count 1 --network-configuration $net --profile $AwsProfile --region $Region --query 'tasks[0].taskArn' --output text).Trim()
+    Assert-Exit 'Start schema migration'
+    if (-not $taskArn -or $taskArn -eq 'None') { throw 'ECS schema task was not launched' }
+    & aws ecs wait tasks-stopped --cluster $cluster --tasks $taskArn --profile $AwsProfile --region $Region
+    Assert-Exit 'Wait for schema migration'
+    $exitCode = (& aws ecs describe-tasks --cluster $cluster --tasks $taskArn --profile $AwsProfile --region $Region --query 'tasks[0].containers[0].exitCode' --output text).Trim()
+    Assert-Exit 'Migration exit inspection'
+    if ($exitCode -ne '0') {
+        & aws logs tail "/ecs/ecommerce-$Environment/phase5-schema" --since 20m --profile $AwsProfile --region $Region
+        throw "Schema migration failed with exit code $exitCode"
+    }
+
+    & python (Join-Path $root 'scripts/phase5_mark_schema_ready.py') --profile $AwsProfile --region $Region --environment $Environment
+    Assert-Exit 'Record operational schema readiness'
+    Write-Host '=== Phase 5: register project-app Shopify HTTPS webhooks ==='
+    & python (Join-Path $root 'scripts/register_phase5_shopify_webhooks.py') --profile $AwsProfile --region $Region --secret-id $SecretId --shop $ShopDomain --url $webhookUrl --apply
+    Assert-Exit 'Shopify HTTPS subscription registration'
+    & python (Join-Path $root 'scripts/phase5_mark_schema_ready.py') --profile $AwsProfile --region $Region --environment $Environment --webhooks-ready
+    Assert-Exit 'Record confirmed Shopify webhook readiness'
+    Write-Host '=== Phase 5: one-order Shopify smoke test ==='
+    $smokeRunId = "smoke-$sha-$(Get-Date -Format yyyyMMdd)"
+    $override = @{ containerOverrides = @(@{
+        name='phase5-generator'
+        command=@('--slot','morning','--apply','--smoke-run-id',$smokeRunId)
+    }) } | ConvertTo-Json -Depth 6 -Compress
+    $smokeTask = (& aws ecs run-task --cluster $cluster --task-definition $generatorDef --launch-type FARGATE --count 1 --network-configuration $net --overrides $override --profile $AwsProfile --region $Region --query 'tasks[0].taskArn' --output text).Trim()
+    Assert-Exit 'Start Shopify smoke order'
+    if (-not $smokeTask -or $smokeTask -eq 'None') { throw 'Shopify smoke task did not launch' }
+    & aws ecs wait tasks-stopped --cluster $cluster --tasks $smokeTask --profile $AwsProfile --region $Region
+    Assert-Exit 'Wait for Shopify smoke order'
+    $smokeCode = (& aws ecs describe-tasks --cluster $cluster --tasks $smokeTask --profile $AwsProfile --region $Region --query 'tasks[0].containers[0].exitCode' --output text).Trim()
+    Assert-Exit 'Inspect Shopify smoke result'
+    if ($smokeCode -ne '0') {
+        & aws logs tail "/ecs/ecommerce-$Environment/phase5-generator" --since 20m --profile $AwsProfile --region $Region
+        throw "Shopify smoke order failed with exit code $smokeCode"
+    }
+    & python (Join-Path $root 'scripts/verify_phase5_smoke.py') --profile $AwsProfile --region $Region --environment $Environment --bucket $landingBucket --run-id $smokeRunId
+    Assert-Exit 'Shopify SQS S3 RDS smoke verification'
+    Write-Host "PHASE 5 DEPLOYED AND SMOKE VERIFIED. Webhook: $webhookUrl"
+    Write-Host 'Schedules: 08:00 (20), 15:00 (25), 18:00 lifecycle — Europe/Berlin.'
+    Write-Host 'SQS landing and minute recovery enabled; RDS idle stop is 30 minutes.'
+    Write-Host 'Check CloudWatch logs and verify an actual Shopify order before declaring end-to-end success.'
+}
+finally { Pop-Location }
+) { throw "Invalid ECR digest for $kind" }
+            # Validate every image (including already-published immutable tags)
+            # before constructing a Terraform plan. An image index digest is not
+            # accepted by Lambda, even when it points to a valid amd64 image.
+            $manifestType = (& aws ecr describe-images --repository-name $name --image-ids "imageTag=$tag" --profile $AwsProfile --region $Region --query 'imageDetails[0].imageManifestMediaType' --output text).Trim()
+            Assert-Exit "Inspect ECR manifest media type $kind"
+            if ($manifestType -notin @('application/vnd.docker.distribution.manifest.v2+json', 'application/vnd.oci.image.manifest.v1+json')) {
+                throw "Unsupported ECR image media type for $kind : $manifestType. Refusing Terraform apply. Rebuild with single-platform buildx and an unused immutable tag."
+            }
+            Write-Host "ECR $kind verified: $manifestType $digest"
+            $imageDigests[$kind] = "$registry/$name@$digest"
+            }
+        }
+        finally {
+            Remove-Variable token, auth, dockerCfg -ErrorAction SilentlyContinue
+            if ($tempConfig) {
+                Remove-Item -LiteralPath $tempConfig -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        $secretArn = (& aws secretsmanager describe-secret --secret-id $SecretId --profile $AwsProfile --region $Region --query ARN --output text).Trim()
+        Assert-Exit 'Shopify app secret lookup'
+        $vars = @(
+            "-var=aws_account_id=$account",
+            "-var=aws_profile=$AwsProfile",
+            "-var=aws_region=$Region",
+            "-var=shopify_shop_domain=$ShopDomain",
+            "-var=shopify_client_credentials_secret_arn=$secretArn",
+            "-var=shopify_webhook_secret_arn=$secretArn",
+            "-var=phase5_lambda_image=$($imageDigests['lambda'])",
+            "-var=phase5_projector_image=$($imageDigests['projector'])",
+            "-var=phase5_generator_image=$($imageDigests['generator'])",
+            "-var=phase5_lifecycle_image=$($imageDigests['lifecycle'])"
+        )
+        $planFile = Join-Path $root '.phase5-release.tfplan'
+        Write-Host '=== Review Terraform plan: Phase 5 enabled ==='
+        & terraform plan @vars "-out=$planFile"
+        Assert-Exit 'Terraform plan'
+        & terraform show $planFile
+        Assert-Exit 'Terraform plan display'
+        if (-not $ApprovePlan) {
+            $confirmation = Read-Host 'Review resources and costs. Type APPLY-PHASE5 to apply this saved plan'
+            if ($confirmation -cne 'APPLY-PHASE5') { throw 'Deployment stopped before Terraform apply' }
+        }
+        & terraform apply $planFile
+        Assert-Exit 'Terraform apply'
+        $schemaTask = (& terraform output -raw phase5_schema_task_definition).Trim()
+        Assert-Exit 'Schema task ARN'
+        $cluster = (& terraform output -raw ecs_cluster_name).Trim()
+        Assert-Exit 'ECS cluster ARN'
+        $subnets = @(& terraform output -json application_subnet_ids | ConvertFrom-Json)
+        Assert-Exit 'Application subnets'
+        $webhookUrl = (& terraform output -raw phase5_webhook_url).Trim()
+        Assert-Exit 'Webhook HTTPS endpoint'
+        $generatorDef = (& terraform output -raw phase5_generator_task_definition).Trim()
+        Assert-Exit 'Generator task definition'
+        $landingBucket = (& terraform output -raw landing_bucket_name).Trim()
+        Assert-Exit 'Landing bucket'
+        # The schema task uses the existing ECS API security group, with RDS access.
+        $ecsSg = (& terraform output -raw phase5_schema_security_group_id).Trim()
+        Assert-Exit 'Schema security group'
+    }
+    finally { Pop-Location }
+
+    Write-Host '=== Phase 5: migrate private RDS before opening webhook intake ==='
+    $dbStatus = (& aws rds describe-db-instances --db-instance-identifier ecommerce-postgres-dev --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AwsProfile --region $Region).Trim()
+    Assert-Exit 'RDS state'
+    if ($dbStatus -eq 'stopped') {
+        & aws rds start-db-instance --db-instance-identifier ecommerce-postgres-dev --profile $AwsProfile --region $Region | Out-Null
+        Assert-Exit 'RDS wake for migration'
+    }
+    & aws rds wait db-instance-available --db-instance-identifier ecommerce-postgres-dev --profile $AwsProfile --region $Region
+    Assert-Exit 'RDS available before migration'
+    $net = @{
+        awsvpcConfiguration = @{
+            subnets = @($subnets)
+            securityGroups = @($ecsSg)
+            assignPublicIp = 'DISABLED'
+        }
+    } | ConvertTo-Json -Depth 7 -Compress
+    $taskArn = (& aws ecs run-task --cluster $cluster --task-definition $schemaTask --launch-type FARGATE --count 1 --network-configuration $net --profile $AwsProfile --region $Region --query 'tasks[0].taskArn' --output text).Trim()
+    Assert-Exit 'Start schema migration'
+    if (-not $taskArn -or $taskArn -eq 'None') { throw 'ECS schema task was not launched' }
+    & aws ecs wait tasks-stopped --cluster $cluster --tasks $taskArn --profile $AwsProfile --region $Region
+    Assert-Exit 'Wait for schema migration'
+    $exitCode = (& aws ecs describe-tasks --cluster $cluster --tasks $taskArn --profile $AwsProfile --region $Region --query 'tasks[0].containers[0].exitCode' --output text).Trim()
+    Assert-Exit 'Migration exit inspection'
+    if ($exitCode -ne '0') {
+        & aws logs tail "/ecs/ecommerce-$Environment/phase5-schema" --since 20m --profile $AwsProfile --region $Region
+        throw "Schema migration failed with exit code $exitCode"
+    }
+
+    & python (Join-Path $root 'scripts/phase5_mark_schema_ready.py') --profile $AwsProfile --region $Region --environment $Environment
+    Assert-Exit 'Record operational schema readiness'
+    Write-Host '=== Phase 5: register project-app Shopify HTTPS webhooks ==='
+    & python (Join-Path $root 'scripts/register_phase5_shopify_webhooks.py') --profile $AwsProfile --region $Region --secret-id $SecretId --shop $ShopDomain --url $webhookUrl --apply
+    Assert-Exit 'Shopify HTTPS subscription registration'
+    & python (Join-Path $root 'scripts/phase5_mark_schema_ready.py') --profile $AwsProfile --region $Region --environment $Environment --webhooks-ready
+    Assert-Exit 'Record confirmed Shopify webhook readiness'
+    Write-Host '=== Phase 5: one-order Shopify smoke test ==='
+    $smokeRunId = "smoke-$sha-$(Get-Date -Format yyyyMMdd)"
+    $override = @{ containerOverrides = @(@{
+        name='phase5-generator'
+        command=@('--slot','morning','--apply','--smoke-run-id',$smokeRunId)
+    }) } | ConvertTo-Json -Depth 6 -Compress
+    $smokeTask = (& aws ecs run-task --cluster $cluster --task-definition $generatorDef --launch-type FARGATE --count 1 --network-configuration $net --overrides $override --profile $AwsProfile --region $Region --query 'tasks[0].taskArn' --output text).Trim()
+    Assert-Exit 'Start Shopify smoke order'
+    if (-not $smokeTask -or $smokeTask -eq 'None') { throw 'Shopify smoke task did not launch' }
+    & aws ecs wait tasks-stopped --cluster $cluster --tasks $smokeTask --profile $AwsProfile --region $Region
+    Assert-Exit 'Wait for Shopify smoke order'
+    $smokeCode = (& aws ecs describe-tasks --cluster $cluster --tasks $smokeTask --profile $AwsProfile --region $Region --query 'tasks[0].containers[0].exitCode' --output text).Trim()
+    Assert-Exit 'Inspect Shopify smoke result'
+    if ($smokeCode -ne '0') {
+        & aws logs tail "/ecs/ecommerce-$Environment/phase5-generator" --since 20m --profile $AwsProfile --region $Region
+        throw "Shopify smoke order failed with exit code $smokeCode"
+    }
+    & python (Join-Path $root 'scripts/verify_phase5_smoke.py') --profile $AwsProfile --region $Region --environment $Environment --bucket $landingBucket --run-id $smokeRunId
+    Assert-Exit 'Shopify SQS S3 RDS smoke verification'
+    Write-Host "PHASE 5 DEPLOYED AND SMOKE VERIFIED. Webhook: $webhookUrl"
+    Write-Host 'Schedules: 08:00 (20), 15:00 (25), 18:00 lifecycle — Europe/Berlin.'
+    Write-Host 'SQS landing and minute recovery enabled; RDS idle stop is 30 minutes.'
+    Write-Host 'Check CloudWatch logs and verify an actual Shopify order before declaring end-to-end success.'
+}
+finally { Pop-Location }
+) {
+                throw "Invalid ECR digest for $($kind): $digest"
+            }
+            # Verify the tagged image points to a single-image manifest.
+            # Lambda cannot consume OCI image index media types.
+            $manifestType = (& aws ecr describe-images --repository-name $name --image-ids "imageTag=$tag" --profile $AwsProfile --region $Region --query 'imageDetails[0].imageManifestMediaType' --output text).Trim()
+            Assert-Exit "Inspect ECR manifest media type $kind"
+            if ($manifestType -notin @('application/vnd.docker.distribution.manifest.v2+json', 'application/vnd.oci.image.manifest.v1+json')) {
+                throw "Unsupported ECR image media type for $($kind): $manifestType. Refusing Terraform apply."
+            }
+            Write-Host "ECR $kind verified: $manifestType $digest"
+            $imageDigests[$kind] = "$registry/$name@$digest"
             }
         }
         finally {

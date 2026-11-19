@@ -5,7 +5,7 @@ on:
       - "scripts/aws/**"
       - ".github/workflows/ops-powershell-ci.yml"
   push:
-    branches: [main]
+    branches: [main, feature/shopify-live-event-generator]
     paths:
       - "scripts/aws/**"
       - ".github/workflows/ops-powershell-ci.yml"

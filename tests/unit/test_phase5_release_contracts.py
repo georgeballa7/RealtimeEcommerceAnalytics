@@ -69,3 +69,12 @@ def test_deployer_produces_lambda_compatible_single_platform_image():
     assert "application/vnd.oci.image.manifest.v1+json" in deploy
     assert "Refusing Terraform apply" in deploy
     assert "& docker --config $tempConfig push $imageTag" in deploy
+
+def test_deployer_checks_image_digest_and_manifest_before_terraform():
+    deploy = (ROOT / "scripts/aws/deploy_phase5_once.ps1").read_text()
+    assert "if ($digest -notmatch '^sha256:[a-f0-9]{64}$')" in deploy
+    assert "imageManifestMediaType" in deploy
+    assert 'imageDigests[$kind] = "$registry/$name@$digest"' in deploy
+    assert "Refusing Terraform apply." in deploy
+    workflow = (ROOT / ".github/workflows/ops-powershell-ci.yml").read_text()
+    assert "feature/shopify-live-event-generator" in workflow
