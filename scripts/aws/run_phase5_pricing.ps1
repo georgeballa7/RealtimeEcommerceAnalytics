@@ -14,6 +14,7 @@
 param(
     [switch]$Execute,
     [switch]$Apply,
+    [switch]$VerifyRds,
     [int]$MaxWaitMinutes = 240,
     [string]$ConfigPath = 'config/aws-demo.json',
     [Parameter(Mandatory)][string]$ImageUri
@@ -21,6 +22,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($Apply -and -not $Execute) { throw 'Use -Execute -Apply together.' }
+if ($VerifyRds -and $Apply) { throw 'Read-only RDS audit cannot be combined with writes.' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 . (Join-Path $PSScriptRoot 'phase5_aws_common.ps1')
 $config = Get-Content -LiteralPath (Join-Path $root $ConfigPath) -Raw | ConvertFrom-Json
@@ -40,9 +42,10 @@ Write-Host "Cluster: $($config.cluster)"
 Write-Host "Task: $($definition.taskDefinitionArn)"
 Write-Host "Approved image: $image"
 Write-Host "Expected catalog population: 3408"
-Write-Host "Mode: $(if ($Apply) {'SHOPIFY + RDS WRITE'} else {'READ-ONLY COMPARE'})"
+Write-Host "Mode: $(if ($VerifyRds) {'READ-ONLY RDS AUDIT'} elseif ($Apply) {'SHOPIFY + RDS WRITE'} else {'READ-ONLY SHOPIFY COMPARE'})"
 if (-not $Execute) { Write-Host 'PREVIEW ONLY. Add -Execute for read-only comparison.'; return }
 $command = @('--limit','3408')
+if ($VerifyRds) { $command = @('--verify-rds') }
 if ($Apply) {
     $confirmation = Read-Host 'Type AUTHORIZE-3408-GBP-PRICES to update Shopify and RDS'
     if ($confirmation -cne 'AUTHORIZE-3408-GBP-PRICES') { throw 'Write authorization not provided.' }

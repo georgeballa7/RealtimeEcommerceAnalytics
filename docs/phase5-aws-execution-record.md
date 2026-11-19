@@ -70,3 +70,24 @@ Review the plan for unintended changes or deletions before applying.
 - Root cause: Windows checkout line-ending conversion is the leading explanation; the repository did not specify `eol=lf` for the SHA-pinned JSON and Docker copied the checkout into the image. The updated image build normalizes CRLF to LF and verifies the exact approved checksum before publication.
 - Do not reuse image digest `94125ff19e2d85a462035ae11b723f84dec54a09ad21d217f97d3f05ce1bbc3f` for the pricing run. Publish a new immutable image.
 - `register_phase5_pricing.ps1` and `run_phase5_pricing.ps1` now require `-ImageUri` with the newly verified immutable digest; they reject an unexpected registry/repository.
+
+## Verified GBP RDS post-run audit
+
+After the full APPLY task finished with exit code 0 and 3,408 Shopify read-back/
+RDS upserts, use the independent SELECT-only database verification path:
+
+```powershell
+# Build and push a NEW immutable image from the commit containing audit mode.
+.\scripts\aws\publish_ecr_image.ps1 -Workload phase5_pricing -Execute -ConfirmPublish
+# Register the new pinned pricing image through Terraform.
+.\scripts\aws\register_phase5_pricing.ps1 -ImageUri $pricingImage -Execute
+# SQL SELECT-only verification of all 3,408 SKU/UUID/price rows:
+.\scripts\aws\run_phase5_pricing.ps1 -ImageUri $pricingImage -Execute -VerifyRds
+```
+
+The audit checks every approved SKU, variant UUID, GBP price, manifest hash,
+shop verification timestamp, and the entire price-state table count.
+PostgreSQL connections are established with
+`default_transaction_read_only=on`; no Shopify client is created and
+no database mutations are performed. A nonzero exit code means failure.
+It does not prove Shopify prices have not changed since the original write.

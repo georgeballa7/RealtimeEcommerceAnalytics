@@ -35,25 +35,47 @@ def main() -> None:
                         default=Path("config/catalog/phase5-gbp-sku-prices-v1.json"))
     parser.add_argument("--limit", type=int, default=3408)
     parser.add_argument("--apply", action="store_true", help="Authorize Shopify and RDS writes")
+    parser.add_argument("--verify-rds", action="store_true", help="SQL SELECT-only audit of all approved GBP prices")
     parser.add_argument("--confirm-sha256", default=None)
     parser.add_argument("--expected-shop", default="realtime-ecommerce-analytics.myshopify.com")
     args = parser.parse_args()
     if not 1 <= args.limit <= 3408:
         parser.error("--limit must be between 1 and 3408")
+    if args.apply and args.verify_rds:
+        parser.error("--verify-rds cannot be combined with --apply")
     if args.apply and args.confirm_sha256 != EXPECTED_SHA256:
         parser.error("--apply requires exact --confirm-sha256 matching approved manifest")
-    missing = [key for key in REQUIRED_ENV if not os.environ.get(key)]
+    keys = REQUIRED_ENV if not args.verify_rds else (
+        "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLROOTCERT"
+    )
+    missing = [key for key in keys if not os.environ.get(key)]
     if missing:
         parser.error("Missing environment settings: " + ", ".join(missing))
     if not Path(os.environ["DB_SSLROOTCERT"]).is_file():
         parser.error("DB_SSLROOTCERT must point to a readable CA bundle")
-    if os.environ["SHOPIFY_SHOP_DOMAIN"] != args.expected_shop:
+    if not args.verify_rds and os.environ["SHOPIFY_SHOP_DOMAIN"] != args.expected_shop:
         parser.error("Unexpected Shopify shop domain")
     raw = args.manifest.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     if digest != EXPECTED_SHA256:
         parser.error("Manifest checksum differs from approved Phase 5 release")
     manifest = json.loads(raw)
+    if args.verify_rds:
+        from ecommerce.application.use_cases.phase5_price_audit import audit_price_state
+
+        dsn = make_conninfo("", host=os.environ["DB_HOST"],
+                            port=os.environ.get("DB_PORT", "5432"),
+                            dbname=os.environ["DB_NAME"], user=os.environ["DB_USER"],
+                            password=os.environ["DB_PASSWORD"])
+        with psycopg.connect(dsn, sslmode="verify-full",
+                             sslrootcert=os.environ["DB_SSLROOTCERT"],
+                             options="-c default_transaction_read_only=on") as connection:
+            report = audit_price_state(connection, manifest, digest)
+        print("Phase 5 RDS verification: " + json.dumps(report, sort_keys=True), flush=True)
+        if report["errors"] or report["matched"] != 3408:
+            raise SystemExit("Phase 5 RDS verification FAILED")
+        print("Phase 5 RDS verification PASSED", flush=True)
+        return
     cfg = ShopifyConfig(shop_domain=args.expected_shop)
     provider = ShopifyClientCredentials(
         cfg.shop_domain, os.environ["SHOPIFY_CLIENT_ID"], os.environ["SHOPIFY_CLIENT_SECRET"])

@@ -71,7 +71,7 @@ try {
     } elseif ($Workload -eq 'phase5_migration') {
         & python -m pytest -q tests/unit/test_phase5_price_migration.py
     } else {
-        & python -m pytest -q tests/unit/test_variant_pricing.py tests/unit/test_shopify_gbp_pricing.py
+        & python -m pytest -q tests/unit/test_variant_pricing.py tests/unit/test_shopify_gbp_pricing.py tests/unit/test_phase5_price_audit.py
     }
     Assert-Exit 'Workload regression tests'
     & docker build --file $dockerfile --label "org.opencontainers.image.revision=$sha" --tag $local .
