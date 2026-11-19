@@ -1,4 +1,4 @@
-# Phase 5 producer/lifecycle schedules (created DISABLED until integration gates pass).
+# Phase 5 producer/lifecycle schedules (enabled in the same deployment).
 # Requires the existing phase5_generator.tf resources in the GitHub repository.
 # Generator container uses Dockerfile.phase5-generator and slot runner.
 variable "phase5_lifecycle_image" {
@@ -173,7 +173,7 @@ resource "aws_scheduler_schedule" "phase5_generation" {
 resource "aws_scheduler_schedule" "phase5_lifecycle" {
   count = var.phase5_lifecycle_image != "" ? 1 : 0
   name = "ecommerce-${var.environment}-phase5-lifecycle"
-  state = "DISABLED"
+  state = "ENABLED"
   schedule_expression = "cron(0 18 * * ? *)"
   schedule_expression_timezone = "Europe/Berlin"
   flexible_time_window { mode = "OFF" }
