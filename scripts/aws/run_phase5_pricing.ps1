@@ -15,7 +15,8 @@ param(
     [switch]$Execute,
     [switch]$Apply,
     [int]$MaxWaitMinutes = 240,
-    [string]$ConfigPath = 'config/aws-demo.json'
+    [string]$ConfigPath = 'config/aws-demo.json',
+    [Parameter(Mandatory)][string]$ImageUri
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,26 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $config = Get-Content -LiteralPath (Join-Path $root $ConfigPath) -Raw | ConvertFrom-Json
 $work = $config.phase5_pricing
 $common = Assert-Phase5Account $config
-$image = '825414820081.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-phase5-pricing-demo@sha256:94125ff19e2d85a462035ae11b723f84dec54a09ad21d217f97d3f05ce1bbc3f'
+$image = $ImageUri
+if ($image -cnotmatch '^825414820081\\.dkr\\.ecr\\.eu-central-1\\.amazonaws\\.com/ecommerce-phase5-pricing-demo@sha256:[0-9a-f]{64}
+$definition = Get-Phase5TaskDefinition -Family $work.task_family -Container $work.container -ImageDigest $image -Common $common
+$manifestSha = '7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06'
+Write-Host "Cluster: $($config.cluster)"
+Write-Host "Task: $($definition.taskDefinitionArn)"
+Write-Host "Approved image: $image"
+Write-Host "Expected catalog population: 3408"
+Write-Host "Mode: $(if ($Apply) {'SHOPIFY + RDS WRITE'} else {'READ-ONLY COMPARE'})"
+if (-not $Execute) { Write-Host 'PREVIEW ONLY. Add -Execute for read-only comparison.'; return }
+$command = @('--limit','3408')
+if ($Apply) {
+    $confirmation = Read-Host 'Type AUTHORIZE-3408-GBP-PRICES to update Shopify and RDS'
+    if ($confirmation -cne 'AUTHORIZE-3408-GBP-PRICES') { throw 'Write authorization not provided.' }
+    $command = @('--apply','--limit','3408','--confirm-sha256',$manifestSha)
+}
+Invoke-Phase5Task -Config $config -Work $work -TaskDefinition $definition.taskDefinitionArn -Command $command -Common $common -MaxWaitMinutes $MaxWaitMinutes
+) {
+    throw 'Expected pinned immutable pricing ECR image URI from project account.'
+}
 $definition = Get-Phase5TaskDefinition -Family $work.task_family -Container $work.container -ImageDigest $image -Common $common
 $manifestSha = '7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06'
 Write-Host "Cluster: $($config.cluster)"
