@@ -220,8 +220,12 @@ def main() -> None:
         parser.error("Unexpected Shopify shop")
     root = Path(__file__).resolve().parents[1]
     manifest_bytes = (root / "config/catalog/phase5-gbp-sku-prices-v1.json").read_bytes()
-    if hashlib.sha256(manifest_bytes).hexdigest() != APPROVED_MANIFEST_SHA:
+    # Match Dockerfile.phase5-generator and Dockerfile.phase5-pricing:
+    # canonical CRLF->LF normalization preserves the approved JSON bytes.
+    canonical_bytes = manifest_bytes.replace(b"\r\n", b"\n")
+    if hashlib.sha256(canonical_bytes).hexdigest() != APPROVED_MANIFEST_SHA:
         parser.error("Approved manifest checksum mismatch")
+    manifest_bytes = canonical_bytes
     manifest = json.loads(manifest_bytes)
     policy = json.loads((root / "config/phase4-simulation-policy.json").read_text())
     if policy["currency"] != "GBP":

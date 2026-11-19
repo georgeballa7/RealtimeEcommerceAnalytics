@@ -37,3 +37,26 @@ def test_deployer_does_not_dirty_worktree_by_running_terraform_fmt():
     assert "& terraform fmt\n" not in deploy
     ignore = (ROOT / ".gitignore").read_text()
     assert "/.phase5-release.tfplan" in ignore
+
+def test_generator_manifest_checksum_survives_windows_checkout():
+    import hashlib
+    import json
+
+    approved_hash = "7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06"
+    path = ROOT / "config/catalog/phase5-gbp-sku-prices-v1.json"
+    data = path.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(data).hexdigest() == approved_hash
+    assert json.loads(data)["count"] == 3408
+    windows_checked_out = data.replace(b"\n", b"\r\n")
+    assert hashlib.sha256(windows_checked_out.replace(b"\r\n", b"\n")).hexdigest() == approved_hash
+    # Meaningful content changes must still be rejected.
+    assert hashlib.sha256(data + b" ").hexdigest() != approved_hash
+
+
+def test_generator_dockerfile_normalizes_manifest_before_verifying_sha():
+    docker = (ROOT / "Dockerfile.phase5-generator").read_text()
+    source = (ROOT / "scripts/generate_shopify_live_orders.py").read_text()
+    assert "b=p.read_bytes().replace(b'\\r\\n',b'\\n')" in docker
+    assert "p.write_bytes(b)" in docker
+    assert "hashlib.sha256(b).hexdigest()" in docker
+    assert 'manifest_bytes.replace(b"\\r\\n", b"\\n")' in source

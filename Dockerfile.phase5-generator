@@ -9,7 +9,10 @@ COPY scripts/generate_shopify_live_orders.py ./scripts/generate_shopify_live_ord
 COPY scripts/phase5_slot_runner.py ./scripts/phase5_slot_runner.py
 COPY config/catalog/phase5-gbp-sku-prices-v1.json ./config/catalog/phase5-gbp-sku-prices-v1.json
 COPY config/phase4-simulation-policy.json ./config/phase4-simulation-policy.json
-RUN python -c "from pathlib import Path; import hashlib; p=Path('config/catalog/phase5-gbp-sku-prices-v1.json'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06', 'Approved GBP price manifest mismatch'" \
+# Windows Git checkout may turn the final LF into CRLF. Match the already
+# validated Phase 5 pricing Dockerfile: normalize line endings ONLY, verify
+# the original approved byte digest, then write canonical LF inside the image.
+RUN python -c "from pathlib import Path; import hashlib; p=Path('config/catalog/phase5-gbp-sku-prices-v1.json'); b=p.read_bytes().replace(b'\\r\\n',b'\\n'); expected='7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06'; actual=hashlib.sha256(b).hexdigest(); assert actual==expected, 'Approved GBP price manifest mismatch: '+actual; p.write_bytes(b); print('Approved GBP manifest verified:',actual)" \
     && pip install --no-cache-dir ".[shopify,aws]" \
     && useradd --system --uid 10001 ecommerce
 USER ecommerce
