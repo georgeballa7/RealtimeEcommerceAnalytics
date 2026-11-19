@@ -36,6 +36,10 @@ resource "aws_iam_role_policy" "phase5_generator_s3" {
       Effect = "Allow"
       Action = ["s3:GetObject", "s3:PutObject"]
       Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/live/v1/*"
+    }, {
+      Effect = "Allow"
+      Action = ["dynamodb:GetItem"]
+      Resource = aws_dynamodb_table.phase5_controller.arn
     }]
   })
 }
@@ -56,7 +60,8 @@ resource "aws_ecs_task_definition" "phase5_generator" {
     environment = [
       { name = "AWS_REGION", value = var.aws_region },
       { name = "SHOPIFY_SHOP_DOMAIN", value = var.shopify_shop_domain },
-      { name = "S3_LANDING_BUCKET", value = aws_s3_bucket.landing.bucket }
+      { name = "S3_LANDING_BUCKET", value = aws_s3_bucket.landing.bucket },
+      { name = "PHASE5_CONTROLLER_TABLE", value = aws_dynamodb_table.phase5_controller.name }
     ]
     secrets = [
       { name = "SHOPIFY_CLIENT_ID", valueFrom = "${var.shopify_client_credentials_secret_arn}:client_id::" },

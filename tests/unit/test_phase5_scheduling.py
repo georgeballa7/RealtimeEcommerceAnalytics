@@ -30,3 +30,17 @@ def test_isolated_smoke_creates_only_one_order():
     cmd=build_command("morning",datetime(2026,11,19,tzinfo=timezone.utc),apply=True,smoke_run_id="smoke-abc123-20261119")
     assert cmd[cmd.index("--count")+1] == "1"
     assert "smoke-abc123-20261119" in cmd
+
+
+def test_production_slot_requires_schema_and_webhook_readiness(monkeypatch):
+    from scripts.phase5_slot_runner import assert_deployment_ready
+    from unittest.mock import MagicMock
+    import sys, types, pytest
+    fake=types.SimpleNamespace(resource=MagicMock())
+    monkeypatch.setitem(sys.modules,"boto3",fake)
+    monkeypatch.setenv("PHASE5_CONTROLLER_TABLE","test-controller")
+    table=fake.resource.return_value.Table.return_value
+    table.get_item.return_value={"Item":{"schema_ready":True,"webhooks_ready":False}}
+    with pytest.raises(RuntimeError): assert_deployment_ready()
+    table.get_item.return_value={"Item":{"schema_ready":True,"webhooks_ready":True}}
+    assert_deployment_ready()

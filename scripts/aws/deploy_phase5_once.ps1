@@ -189,6 +189,8 @@ try {
     Write-Host '=== Phase 5: register project-app Shopify HTTPS webhooks ==='
     & python (Join-Path $root 'scripts/register_phase5_shopify_webhooks.py') --profile $AwsProfile --region $Region --secret-id $SecretId --shop $ShopDomain --url $webhookUrl --apply
     Assert-Exit 'Shopify HTTPS subscription registration'
+    & python (Join-Path $root 'scripts/phase5_mark_schema_ready.py') --profile $AwsProfile --region $Region --environment $Environment --webhooks-ready
+    Assert-Exit 'Record confirmed Shopify webhook readiness'
     Write-Host '=== Phase 5: one-order Shopify smoke test ==='
     $smokeRunId = "smoke-$sha-$(Get-Date -Format yyyyMMdd)"
     $override = @{ containerOverrides = @(@{

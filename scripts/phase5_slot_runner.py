@@ -6,6 +6,7 @@ of order creation and S3 idempotency. Preview unless --apply is explicitly set.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -31,6 +32,17 @@ def build_command(slot: str, now: datetime, apply: bool = False, smoke_run_id: s
     return cmd
 
 
+def assert_deployment_ready():
+    table_name = os.environ.get("PHASE5_CONTROLLER_TABLE")
+    if not table_name:
+        return  # Local preview/test invocation (not ECS scheduled production)
+    import boto3
+    record = boto3.resource("dynamodb").Table(table_name).get_item(
+        Key={"id":"phase5-controller"}, ConsistentRead=True).get("Item", {})
+    if not (record.get("schema_ready") is True and record.get("webhooks_ready") is True):
+        raise RuntimeError("Phase 5 deployment is not ready for Shopify mutations")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--slot", choices=("morning", "afternoon"), required=True)
@@ -38,6 +50,8 @@ def main():
     ap.add_argument("--smoke-run-id")
     args = ap.parse_args()
     # Host controls the task; never infer an apply from the environment.
+    if args.apply:
+        assert_deployment_ready()
     cmd = build_command(args.slot, datetime.now(ZoneInfo("UTC")), apply=args.apply, smoke_run_id=args.smoke_run_id)
     raise SystemExit(subprocess.call(cmd))
 
