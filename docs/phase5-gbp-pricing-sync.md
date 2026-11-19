@@ -10,12 +10,12 @@ Shopify is authoritative for current catalog prices; historical Silver is immuta
    the **separate DDL role** inside the private VPC; do not run migrations on startup.
 2. Build and deploy a reviewed worker image with the updated feature-branch code,
    existing Shopify OAuth environment variables and RDS TLS trust bundle.
-3. Run `python scripts/sync_gbp_variant_prices.py --limit 10` for a **read-only**
+3. Run `python scripts/sync_gbp_variant_prices.py --limit 3408` for a **read-only**
    Shopify-vs-manifest preview (DB SELECT only). This requires VPC connectivity.
-4. Review the preview and explicitly approve the initial write before using:
-   `python scripts/sync_gbp_variant_prices.py --apply --limit 10 --confirm-sha256 7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06`
-5. Verify Shopify read-back and RDS rows. The first release intentionally blocks
-   write batches larger than 10; extending requires a separate reviewed change.
+4. Review the full-catalog preview, then explicitly approve one complete run:
+   `python scripts/sync_gbp_variant_prices.py --apply --limit 3408 --confirm-sha256 7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06`
+5. Verify Shopify read-back and all 3,408 RDS rows. The runner checkpoints
+   each successfully verified variant in RDS and logs aggregate progress every 100 items.
 
 Shopify mutation errors and ambiguous network failures stop the run. Repeated runs
 compare current Shopify prices first, so completed items are skipped. RDS is updated

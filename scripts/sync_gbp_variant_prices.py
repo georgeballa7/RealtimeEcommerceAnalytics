@@ -33,7 +33,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path,
                         default=Path("config/catalog/phase5-gbp-sku-prices-v1.json"))
-    parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--limit", type=int, default=3408)
     parser.add_argument("--apply", action="store_true", help="Authorize Shopify and RDS writes")
     parser.add_argument("--confirm-sha256", default=None)
     parser.add_argument("--expected-shop", default="realtime-ecommerce-analytics.myshopify.com")
@@ -42,10 +42,6 @@ def main() -> None:
         parser.error("--limit must be between 1 and 3408")
     if args.apply and args.confirm_sha256 != EXPECTED_SHA256:
         parser.error("--apply requires exact --confirm-sha256 matching approved manifest")
-    if args.apply and args.limit > 10:
-        parser.error("Initial write batch limited to 10; review before extending")
-    if args.apply and args.limit < 1:
-        parser.error("Empty write batch")
     missing = [key for key in REQUIRED_ENV if not os.environ.get(key)]
     if missing:
         parser.error("Missing environment settings: " + ", ".join(missing))
@@ -98,7 +94,9 @@ def main() -> None:
                     repo.save_confirmed(variant_id=target.variant_id, price_gbp=actual,
                                         manifest_sha256=digest)
                     summary["rds_recorded"] += 1
-            print(json.dumps(summary, sort_keys=True), flush=True)
+                if summary["inspected"] % 100 == 0 or summary["inspected"] == args.limit:
+                    print("Phase 5 progress: " + json.dumps(summary, sort_keys=True), flush=True)
+            print("Phase 5 final: " + json.dumps(summary, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":
