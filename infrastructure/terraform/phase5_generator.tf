@@ -37,6 +37,13 @@ resource "aws_iam_role_policy" "phase5_generator_s3" {
       Action = ["s3:GetObject", "s3:PutObject"]
       Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/live/v1/*"
     }, {
+      # S3 returns 403 instead of NoSuchKey/404 for a missing journal object
+      # unless the caller also has bucket-level ListBucket permission.
+      # Required by S3OperationJournal.read() on the first generation run.
+      Effect = "Allow"
+      Action = ["s3:ListBucket"]
+      Resource = aws_s3_bucket.landing.arn
+    }, {
       Effect = "Allow"
       Action = ["dynamodb:GetItem"]
       Resource = aws_dynamodb_table.phase5_controller.arn
