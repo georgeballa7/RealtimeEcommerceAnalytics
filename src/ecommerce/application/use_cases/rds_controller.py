@@ -110,6 +110,8 @@ class RdsController:
             state = self._state()
             if state.get("error_hold"):
                 return "error_hold"
+            if not state.get("schema_ready", False):
+                return "schema_not_ready"
             active = state.get("worker_task_arn")
             if active:
                 if self._worker(active) == "running":

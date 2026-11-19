@@ -48,6 +48,7 @@ class FakeECS:
 
 def setup():
     control,index,db,ecs=FakeControl(),FakeIndex(),FakeDB(),FakeECS()
+    control.record["schema_ready"] = True
     x=RdsController(db=db,ecs=ecs,index=index,control=control,
                     db_identifier='test',cluster='test-cluster', task_definition='test-def',
                     subnets=['a'],security_groups=['s'], automatic_stop_enabled=True)
@@ -97,6 +98,7 @@ def test_failed_worker_never_stops_rds():
 def test_default_does_not_automatically_stop_shared_rds():
     control,index,db,ecs=FakeControl(),FakeIndex(),FakeDB(),FakeECS()
     db.status='available'
+    control.record["schema_ready"] = True
     c=RdsController(db=db,ecs=ecs,index=index,control=control,
                     db_identifier='test',cluster='test',task_definition='def',
                     subnets=['a'],security_groups=['s'])
@@ -119,3 +121,13 @@ def test_any_other_ecs_task_blocks_stop():
     ecs.list_tasks=lambda **kw: {'taskArns':['another-task']}
     assert c.advance(T0+timedelta(hours=1)) == 'other_ecs_workloads_running'
     assert db.stops == 0
+
+
+def test_schema_gate_prevents_processing_before_migration():
+    c,state,events,db,ecs=setup()
+    state.record["schema_ready"] = False
+    events.pending = True
+    assert c.advance(T0) == "schema_not_ready"
+    assert db.starts == 0
+    state.record["schema_ready"] = True
+    assert c.advance(T0+timedelta(minutes=1)) == "rds_start_requested"
