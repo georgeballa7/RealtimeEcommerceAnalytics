@@ -8,7 +8,7 @@ The temporary Docker config workaround matches the engineering runbook.
 [CmdletBinding()]
 param(
     [string]$ConfigPath = 'config/aws-demo.json',
-    [ValidateSet('customer_sync','catalog_sync','phase5_migration','phase5_pricing')][string]$Workload = 'customer_sync',
+    [ValidateSet('customer_sync','catalog_sync','phase5_migration','phase5_pricing','phase5_generator')][string]$Workload = 'customer_sync',
     [string]$ImageTag,
     [switch]$Execute,
     [switch]$ConfirmPublish
@@ -70,8 +70,10 @@ try {
         & python -m pytest -q tests/unit/test_catalog_selection.py tests/unit/test_catalog_sync.py tests/unit/test_catalog_persistence.py tests/unit/test_shopify_catalog_client.py
     } elseif ($Workload -eq 'phase5_migration') {
         & python -m pytest -q tests/unit/test_phase5_price_migration.py
-    } else {
+    } elseif ($Workload -eq 'phase5_pricing') {
         & python -m pytest -q tests/unit/test_variant_pricing.py tests/unit/test_shopify_gbp_pricing.py tests/unit/test_phase5_price_audit.py
+    } else {
+        & python -m pytest -q tests/unit/test_phase5_live_generator.py
     }
     Assert-Exit 'Workload regression tests'
     & docker build --file $dockerfile --label "org.opencontainers.image.revision=$sha" --tag $local .
