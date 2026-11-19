@@ -1,13 +1,16 @@
+# Final reviewed Phase 5 generator build: replaces the earlier single-run Dockerfile.
+# Emits no orders without --apply, including manually launched tasks.
 FROM python:3.12-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 AWS_DEFAULT_REGION=eu-central-1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /opt/app
 COPY pyproject.toml ./
 COPY src/ ./src/
 COPY scripts/generate_shopify_live_orders.py ./scripts/generate_shopify_live_orders.py
+COPY scripts/phase5_slot_runner.py ./scripts/phase5_slot_runner.py
 COPY config/catalog/phase5-gbp-sku-prices-v1.json ./config/catalog/phase5-gbp-sku-prices-v1.json
 COPY config/phase4-simulation-policy.json ./config/phase4-simulation-policy.json
-RUN python -c "from pathlib import Path; import hashlib; p=Path('config/catalog/phase5-gbp-sku-prices-v1.json'); b=p.read_bytes().replace(b'\r\n',b'\n'); assert hashlib.sha256(b).hexdigest()=='7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06', 'Manifest hash mismatch'; p.write_bytes(b)" \
+RUN python -c "from pathlib import Path; import hashlib; p=Path('config/catalog/phase5-gbp-sku-prices-v1.json'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06', 'Approved GBP price manifest mismatch'" \
     && pip install --no-cache-dir ".[shopify,aws]" \
     && useradd --system --uid 10001 ecommerce
 USER ecommerce
-ENTRYPOINT ["python", "scripts/generate_shopify_live_orders.py"]
+ENTRYPOINT ["python", "scripts/phase5_slot_runner.py"]
