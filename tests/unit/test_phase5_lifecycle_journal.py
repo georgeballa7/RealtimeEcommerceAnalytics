@@ -1,5 +1,4 @@
 import io
-import json
 import hashlib
 import pytest
 from botocore.exceptions import ClientError

@@ -24,7 +24,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration", "tests/e2e"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = [
     "integration: requires configured external services",
     "e2e: requires deployed integration environment",
@@ -33,3 +33,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# Enforce executable correctness while leaving cosmetic import/order rules for later cleanup.
+ignore = ["I001", "UP017", "C408"]
