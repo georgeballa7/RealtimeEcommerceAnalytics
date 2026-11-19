@@ -22,3 +22,11 @@ def test_dst_time_uses_berlin_date_not_utc():
     timestamp = datetime(2027, 6, 1, 22, 30, tzinfo=timezone.utc)
     command = m.build_command('morning', timestamp)
     assert 'live-20270602-morning' in command
+
+
+def test_isolated_smoke_creates_only_one_order():
+    from datetime import datetime, timezone
+    from scripts.phase5_slot_runner import build_command
+    cmd=build_command("morning",datetime(2026,11,19,tzinfo=timezone.utc),apply=True,smoke_run_id="smoke-abc123-20261119")
+    assert cmd[cmd.index("--count")+1] == "1"
+    assert "smoke-abc123-20261119" in cmd
