@@ -48,8 +48,12 @@ try {
 
     Push-Location (Join-Path $root 'infrastructure/terraform')
     try {
-        & terraform fmt
-        Assert-Exit 'Terraform formatting'
+        # Read-only formatting check: never mutate tracked Terraform files.
+        # Validation is authoritative; whitespace differences do not require a new rollout.
+        & terraform fmt -check -diff
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Terraform files need formatting, but deployment will not modify source files. Continuing to terraform validate.'
+        }
         & terraform init
         Assert-Exit 'Terraform initialization'
         & terraform validate

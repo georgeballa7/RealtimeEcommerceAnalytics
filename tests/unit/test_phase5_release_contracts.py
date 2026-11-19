@@ -29,3 +29,11 @@ def test_deployer_reuses_temporary_docker_ecr_push_workaround():
     assert "& docker --config $tempConfig push $imageTag" in deploy
     assert "Remove-Item -LiteralPath $tempConfig -Recurse -Force" in deploy
     assert "get-login-password" in deploy
+
+
+def test_deployer_does_not_dirty_worktree_by_running_terraform_fmt():
+    deploy = (ROOT / "scripts/aws/deploy_phase5_once.ps1").read_text()
+    assert "& terraform fmt -check -diff" in deploy
+    assert "& terraform fmt\n" not in deploy
+    ignore = (ROOT / ".gitignore").read_text()
+    assert "/.phase5-release.tfplan" in ignore
