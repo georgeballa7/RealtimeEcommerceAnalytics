@@ -10,7 +10,7 @@ variable "enable_redshift_warehouse" {
 variable "redshift_daily_rpu_hour_limit" {
   type        = number
   default     = 8
-  description = "Stop queries after this many RPU-hours each day (not an account-wide dollar cap)."
+  description = "Log daily compute usage beyond this RPU-hour threshold; monthly limit handles deactivation."
   validation {
     condition     = var.redshift_daily_rpu_hour_limit > 0 && var.redshift_daily_rpu_hour_limit <= 24
     error_message = "Select an RPU-hour limit between 0 and 24 for this demo."
@@ -109,7 +109,7 @@ resource "aws_redshiftserverless_usage_limit" "analytics_daily" {
   usage_type    = "serverless-compute"
   period        = "daily"
   amount        = var.redshift_daily_rpu_hour_limit
-  breach_action = "deactivate"
+  breach_action = "log"
 }
 
 # A separate monthly ceiling prevents daily reactivation from exhausting the
@@ -121,6 +121,10 @@ resource "aws_redshiftserverless_usage_limit" "analytics_monthly" {
   period        = "monthly"
   amount        = var.redshift_monthly_rpu_hour_limit
   breach_action = "deactivate"
+
+  # AWS allows only one deactivation usage limit per compute feature.
+  # First convert any existing daily deactivation limit to logging.
+  depends_on = [aws_redshiftserverless_usage_limit.analytics_daily]
 }
 
 output "analytics_redshift_workgroup" {
