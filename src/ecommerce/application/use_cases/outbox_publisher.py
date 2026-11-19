@@ -143,7 +143,7 @@ class SqsOutboxPublisher:
                     'topic': {'DataType': 'String', 'StringValue': event.topic},
                 },
             )
-        except Exception:  # noqa: BLE001 - catch SDK failures and schedule retry
+        except Exception:  # catch SDK failures and schedule retry
             # Return the event to pending; callers must never treat it as sent.
             # Do not log exception details: SDK exceptions may contain sensitive data.
             LOGGER.warning('Outbox SQS publish failed for id=%s', event.outbox_id)
