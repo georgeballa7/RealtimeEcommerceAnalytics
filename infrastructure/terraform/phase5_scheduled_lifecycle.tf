@@ -1,6 +1,6 @@
 # Phase 5 producer/lifecycle schedules (created DISABLED until integration gates pass).
 # Requires the existing phase5_generator.tf resources in the GitHub repository.
-# Generator container uses Dockerfile.phase5-generator-complete and slot runner.
+# Generator container uses Dockerfile.phase5-generator and slot runner.
 variable "phase5_lifecycle_image" {
   description = "Immutable lifecycle ECS digest; empty prevents lifecycle ECS task and schedule"
   type        = string
@@ -67,6 +67,7 @@ resource "aws_ecs_task_definition" "phase5_lifecycle" {
   memory = "1024"
   execution_role_arn = aws_iam_role.customer_sync_execution.arn
   task_role_arn = aws_iam_role.phase5_lifecycle_task.arn
+  depends_on = [aws_iam_role_policy.customer_sync_execution_secrets]
   container_definitions = jsonencode([{
     name = "phase5-lifecycle"
     image = var.phase5_lifecycle_image
@@ -142,7 +143,7 @@ locals {
 resource "aws_scheduler_schedule" "phase5_generation" {
   for_each = var.phase5_generator_image == "" ? {} : local.phase5_generation_slots
   name = "ecommerce-${var.environment}-phase5-${each.key}"
-  state = "DISABLED"
+  state = "ENABLED"
   schedule_expression = each.value.cron
   schedule_expression_timezone = "Europe/Berlin"
   flexible_time_window { mode = "OFF" }

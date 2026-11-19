@@ -92,6 +92,7 @@ resource "aws_ecs_task_definition" "phase5_projector" {
   memory = "1024"
   execution_role_arn = aws_iam_role.customer_sync_execution.arn
   task_role_arn = aws_iam_role.phase5_projector.arn
+  depends_on = [aws_iam_role_policy.customer_sync_execution_secrets]
   container_definitions = jsonencode([{
     name = "phase5-projector", image = var.phase5_projector_image, essential = true,
     environment = [
@@ -201,7 +202,7 @@ resource "aws_lambda_event_source_mapping" "phase5_landing" {
   event_source_arn = aws_sqs_queue.events.arn
   function_name = aws_lambda_function.phase5_landing[0].arn
   batch_size = 1
-  enabled = false # Explicitly enable only after webhook and event tests pass
+  enabled = true # Subscriber is registered only after schema migration completes
   function_response_types = ["ReportBatchItemFailures"]
 }
 resource "aws_apigatewayv2_api" "phase5" {
@@ -258,14 +259,14 @@ resource "aws_lambda_function" "phase5_controller" {
     PROJECTOR_SUBNETS = join(",", aws_subnet.application[*].id),
     PROJECTOR_SECURITY_GROUPS = aws_security_group.ecs.id,
     RDS_IDLE_MINUTES = "30",
-    ALLOW_AUTOMATIC_RDS_STOP = "false" # explicit safety gate for shared DB
+    ALLOW_AUTOMATIC_RDS_STOP = "true" # 30-minute idle shutdown with lock, backlog and ECS guards
   } }
 }
 resource "aws_cloudwatch_event_rule" "phase5_reconcile" {
   count = local.phase5_live_ready ? 1 : 0
   name = "ecommerce-${var.environment}-phase5-reconcile"
   schedule_expression = "rate(1 minute)"
-  state = "DISABLED" # Enable only after full end-to-end approval
+  state = "ENABLED" # Recovery reconciliation must never be disabled
 }
 resource "aws_cloudwatch_event_target" "phase5_reconcile" {
   count = local.phase5_live_ready ? 1 : 0

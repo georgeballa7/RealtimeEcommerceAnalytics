@@ -2,6 +2,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY src/ /app/src/
+COPY infrastructure/sql/ /app/infrastructure/sql/
 RUN pip install --no-cache-dir 'boto3>=1.35' 'psycopg[binary]>=3.2' && useradd --uid 10001 --system worker
 ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
 RUN chmod 644 /etc/ssl/certs/rds-global-bundle.pem
