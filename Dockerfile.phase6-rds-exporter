@@ -1,0 +1,8 @@
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /opt/app
+RUN pip install --no-cache-dir "boto3>=1.35,<2" "psycopg[binary]>=3.2,<4"
+RUN python -c "import urllib.request; urllib.request.urlretrieve('https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem', '/etc/ssl/certs/rds-global-bundle.pem')"
+COPY scripts/redshift/export_rds_live.py /opt/app/export_rds_live.py
+ENTRYPOINT ["python", "/opt/app/export_rds_live.py"]
+CMD ["--help"]
