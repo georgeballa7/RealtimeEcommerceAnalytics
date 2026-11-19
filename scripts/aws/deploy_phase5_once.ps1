@@ -146,6 +146,10 @@ try {
         Assert-Exit 'Application subnets'
         $webhookUrl = (& terraform output -raw phase5_webhook_url).Trim()
         Assert-Exit 'Webhook HTTPS endpoint'
+        $generatorDef = (& terraform output -raw phase5_generator_task_definition).Trim()
+        Assert-Exit 'Generator task definition'
+        $landingBucket = (& terraform output -raw landing_bucket_name).Trim()
+        Assert-Exit 'Landing bucket'
         # The schema task uses the existing ECS API security group, with RDS access.
         $ecsSg = (& terraform output -raw phase5_schema_security_group_id).Trim()
         Assert-Exit 'Schema security group'
@@ -185,7 +189,26 @@ try {
     Write-Host '=== Phase 5: register project-app Shopify HTTPS webhooks ==='
     & python (Join-Path $root 'scripts/register_phase5_shopify_webhooks.py') --profile $AwsProfile --region $Region --secret-id $SecretId --shop $ShopDomain --url $webhookUrl --apply
     Assert-Exit 'Shopify HTTPS subscription registration'
-    Write-Host "PHASE 5 DEPLOYED. Webhook: $webhookUrl"
+    Write-Host '=== Phase 5: one-order Shopify smoke test ==='
+    $smokeRunId = "smoke-$sha-$(Get-Date -Format yyyyMMdd)"
+    $override = @{ containerOverrides = @(@{
+        name='phase5-generator'
+        command=@('--slot','morning','--apply','--smoke-run-id',$smokeRunId)
+    }) } | ConvertTo-Json -Depth 6 -Compress
+    $smokeTask = (& aws ecs run-task --cluster $cluster --task-definition $generatorDef --launch-type FARGATE --count 1 --network-configuration $net --overrides $override --profile $AwsProfile --region $Region --query 'tasks[0].taskArn' --output text).Trim()
+    Assert-Exit 'Start Shopify smoke order'
+    if (-not $smokeTask -or $smokeTask -eq 'None') { throw 'Shopify smoke task did not launch' }
+    & aws ecs wait tasks-stopped --cluster $cluster --tasks $smokeTask --profile $AwsProfile --region $Region
+    Assert-Exit 'Wait for Shopify smoke order'
+    $smokeCode = (& aws ecs describe-tasks --cluster $cluster --tasks $smokeTask --profile $AwsProfile --region $Region --query 'tasks[0].containers[0].exitCode' --output text).Trim()
+    Assert-Exit 'Inspect Shopify smoke result'
+    if ($smokeCode -ne '0') {
+        & aws logs tail "/ecs/ecommerce-$Environment/phase5-generator" --since 20m --profile $AwsProfile --region $Region
+        throw "Shopify smoke order failed with exit code $smokeCode"
+    }
+    & python (Join-Path $root 'scripts/verify_phase5_smoke.py') --profile $AwsProfile --region $Region --environment $Environment --bucket $landingBucket --run-id $smokeRunId
+    Assert-Exit 'Shopify SQS S3 RDS smoke verification'
+    Write-Host "PHASE 5 DEPLOYED AND SMOKE VERIFIED. Webhook: $webhookUrl"
     Write-Host 'Schedules: 08:00 (20), 15:00 (25), 18:00 lifecycle — Europe/Berlin.'
     Write-Host 'SQS landing and minute recovery enabled; RDS idle stop is 30 minutes.'
     Write-Host 'Check CloudWatch logs and verify an actual Shopify order before declaring end-to-end success.'
