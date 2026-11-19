@@ -63,6 +63,7 @@ class SqsToS3LandingConsumer:
         if not bucket or not queue_url.startswith('https://'):
             raise ValueError('Missing configured queue/bucket')
         self.s3, self.bucket = s3_client, bucket
+        self.sqs, self.queue_url = sqs_client, queue_url
 
     def persist(self, envelope):
         data = envelope.object_bytes()
@@ -80,3 +81,49 @@ class SqsToS3LandingConsumer:
         if head.get('Metadata',{}).get('sha256') != digest:
             raise ConflictingReplay('Webhook duplicate has conflicting data')
         return 'duplicate'
+
+    def process_message(self, message: dict) -> str:
+        """Legacy ECS polling path: acknowledge SQS only after durable S3 landing.
+
+        New Lambda event-source processing calls persist() directly and lets
+        Lambda manage SQS acknowledgements via ReportBatchItemFailures.
+        """
+        if self.sqs is None:
+            raise RuntimeError("SQS polling client is not configured")
+        if not isinstance(message, dict):
+            raise InvalidEvent("Invalid SQS message")
+        body, receipt = message.get("Body"), message.get("ReceiptHandle")
+        if not isinstance(receipt, str) or not receipt:
+            raise InvalidEvent("Missing SQS receipt handle")
+        envelope = WebhookEnvelope.from_sqs_body(body)
+        outcome = self.persist(envelope)
+        # Any failed delete propagates: SQS redelivers and S3 deduplicates.
+        self.sqs.delete_message(QueueUrl=self.queue_url, ReceiptHandle=receipt)
+        return outcome
+
+    def poll_once(self, *, wait_seconds: int = 20, max_messages: int = 10) -> dict[str, int]:
+        """Backwards-compatible ECS long-polling loop; no silent acknowledgements."""
+        if (isinstance(wait_seconds, bool) or not isinstance(wait_seconds, int)
+                or not 0 <= wait_seconds <= 20):
+            raise ValueError("wait_seconds must be between 0 and 20")
+        if (isinstance(max_messages, bool) or not isinstance(max_messages, int)
+                or not 1 <= max_messages <= 10):
+            raise ValueError("max_messages must be between 1 and 10")
+        if self.sqs is None:
+            raise RuntimeError("SQS polling client is not configured")
+        response = self.sqs.receive_message(
+            QueueUrl=self.queue_url,
+            WaitTimeSeconds=wait_seconds,
+            MaxNumberOfMessages=max_messages,
+        )
+        messages = response.get("Messages", [])
+        counts = {"received": len(messages), "created": 0, "duplicate": 0, "failed": 0}
+        for message in messages:
+            try:
+                outcome = self.process_message(message)
+            except Exception:
+                # Leave failed/invalid messages in SQS for retry then DLQ.
+                counts["failed"] += 1
+            else:
+                counts[outcome] += 1
+        return counts
