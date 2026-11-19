@@ -9,8 +9,16 @@ def test_warehouse_disabled_until_explicit_opt_in():
     terraform = (ROOT / "infrastructure/terraform/phase6_redshift.tf").read_text()
     assert 'variable "enable_redshift_warehouse"' in terraform
     assert "default     = false" in terraform
-    assert 'breach_action = "deactivate"' in terraform
     assert 'variable "redshift_monthly_rpu_hour_limit"' in terraform
+    daily_limit = terraform.split(
+        'resource "aws_redshiftserverless_usage_limit" "analytics_daily" {', 1
+    )[1].split("\n}", 1)[0]
+    monthly_limit = terraform.split(
+        'resource "aws_redshiftserverless_usage_limit" "analytics_monthly" {', 1
+    )[1].split("\n}", 1)[0]
+    assert 'breach_action = "log"' in daily_limit
+    assert 'breach_action = "deactivate"' in monthly_limit
+    assert 'depends_on = [aws_redshiftserverless_usage_limit.analytics_daily]' in monthly_limit
     assert '"analytics_monthly"' in terraform
     assert 'period        = "monthly"' in terraform
     assert re.search(r"\bbase_capacity\s*=\s*4\b", terraform)
