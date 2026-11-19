@@ -49,5 +49,7 @@ def test_lambda_functions_have_separate_execution_roles():
         assert f'role = aws_iam_role.{role}.arn' in after
 
 
-def test_automatic_rds_stop_disabled_until_review():
-    assert 'ALLOW_AUTOMATIC_RDS_STOP = "false"' in TF
+def test_automatic_rds_stop_enabled_with_controller_guards():
+    assert 'ALLOW_AUTOMATIC_RDS_STOP = "true"' in TF
+    assert 'RDS_IDLE_MINUTES = "30"' in TF
+    assert 'state = "ENABLED"' in TF
