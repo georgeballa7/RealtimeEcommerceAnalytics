@@ -79,11 +79,6 @@ try {
                 Assert-Exit "Import ECR repository $name"
             }
         }
-        $loginPassword = & aws ecr get-login-password --profile $AwsProfile --region $Region
-        Assert-Exit 'ECR authorization'
-        $loginPassword | & docker login --username AWS --password-stdin $registry
-        Assert-Exit 'Docker ECR login'
-
         $sha = (& git -C $root rev-parse --short=12 HEAD).Trim()
         Assert-Exit 'Git revision'
         $tag = "phase5-$sha"
@@ -93,8 +88,27 @@ try {
             generator = 'Dockerfile.phase5-generator'
             lifecycle = 'Dockerfile.phase5-lifecycle'
         }
+        # Reuse the proven Windows ECR workaround from publish_ecr_image.ps1.
+        # Docker login fails with HTTP 400 on this machine; push with an isolated
+        # temporary config.json instead of the Docker Desktop credential helper.
+        $tempConfig = $null
         $imageDigests = @{}
-        foreach ($kind in $repositories.Keys) {
+        try {
+            $tempConfig = Join-Path ([IO.Path]::GetTempPath()) ('ecr-push-' + [guid]::NewGuid())
+            New-Item -ItemType Directory -Path $tempConfig -ErrorAction Stop | Out-Null
+            $token = & aws ecr get-login-password --profile $AwsProfile --region $Region
+            Assert-Exit 'ECR authorization'
+            if (-not $token) { throw 'Empty ECR token' }
+            $auth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('AWS:' + $token))
+            $dockerCfg = @{ auths = @{ $registry = @{ auth = $auth } } }
+            [IO.File]::WriteAllText(
+                (Join-Path $tempConfig 'config.json'),
+                ($dockerCfg | ConvertTo-Json -Depth 5 -Compress),
+                [Text.UTF8Encoding]::new($false)
+            )
+            Remove-Variable token, auth, dockerCfg -ErrorAction SilentlyContinue
+
+            foreach ($kind in $repositories.Keys) {
             $name = $repositories[$kind]
             $digest = (& aws ecr list-images --repository-name $name --filter tagStatus=TAGGED --profile $AwsProfile --region $Region --query "imageIds[?imageTag=='$tag'].imageDigest | [0]" --output text).Trim()
             Assert-Exit "Inspect image tag $kind"
@@ -104,13 +118,20 @@ try {
                 Write-Host "Building $kind from $($dockerFiles[$kind])"
                 & docker build -f (Join-Path $root $dockerFiles[$kind]) -t $imageTag $root
                 Assert-Exit "Docker build $kind"
-                & docker push $imageTag
-                Assert-Exit "Docker push $kind"
+                & docker --config $tempConfig push $imageTag
+                Assert-Exit "Docker ECR push $kind"
                 $digest = (& aws ecr describe-images --repository-name $name --image-ids "imageTag=$tag" --profile $AwsProfile --region $Region --query 'imageDetails[0].imageDigest' --output text).Trim()
                 Assert-Exit "Resolve $kind ECR digest"
             }
             if ($digest -notmatch '^sha256:[a-f0-9]{64}$') { throw "Invalid ECR digest for $kind" }
             $imageDigests[$kind] = "$registry/$name@$digest"
+            }
+        }
+        finally {
+            Remove-Variable token, auth, dockerCfg -ErrorAction SilentlyContinue
+            if ($tempConfig) {
+                Remove-Item -LiteralPath $tempConfig -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
         $secretArn = (& aws secretsmanager describe-secret --secret-id $SecretId --profile $AwsProfile --region $Region --query ARN --output text).Trim()
         Assert-Exit 'Shopify app secret lookup'
