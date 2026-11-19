@@ -42,6 +42,16 @@ def test_historical_loader_never_reconstructs_source_ids_or_fabricates_orders():
     assert "BatchExecuteStatement" in loader or "batch_execute_statement" in loader
 
 
+def test_redshift_raw_schema_bootstrap_is_repeatable():
+    schema_sql = (ROOT / "analytics/redshift/raw_schema.sql").read_text()
+    loader = (ROOT / "scripts/redshift/load_warehouse.py").read_text()
+    assert "CREATE SCHEMA IF NOT EXISTS raw" not in schema_sql
+    assert "CREATE SCHEMA raw" in loader
+    assert "pg_namespace WHERE nspname = 'raw'" in loader
+    assert "if not raw_schema_exists" in loader
+    assert "CREATE TABLE IF NOT EXISTS raw.synthetic_orders" in schema_sql
+
+
 def test_analytics_retains_synthetic_label_and_temporal_churn_window():
     mart = (ROOT / "analytics/dbt/models/marts/mart_customer_churn_training.sql").read_text()
     fact = (ROOT / "analytics/dbt/models/marts/fct_orders.sql").read_text()
