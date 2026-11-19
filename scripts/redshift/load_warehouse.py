@@ -104,6 +104,31 @@ def run_data_api(client, *, workgroup: str, database: str, statements: list[str]
     raise TimeoutError("Redshift statement state uncertain; reconcile before replay")
 
 
+def raw_schema_exists(client, *, workgroup: str, database: str,
+                      timeout: int = 120) -> bool:
+    """Check the catalog before adding CREATE SCHEMA to the DDL batch.
+
+    The target warehouse rejected CREATE SCHEMA IF NOT EXISTS; the explicit
+    catalog check makes repeated bootstrap runs safe without that syntax.
+    """
+    execution_id = client.execute_statement(
+        WorkgroupName=workgroup, Database=database,
+        Sql="SELECT 1 FROM pg_namespace WHERE nspname = 'raw'",
+    )["Id"]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = client.describe_statement(Id=execution_id)
+        if status["Status"] in ("FAILED", "ABORTED"):
+            raise RuntimeError(
+                "Redshift schema lookup failed: " + str(status.get("Error", ""))[:500]
+            )
+        if status["Status"] == "FINISHED":
+            result = client.get_statement_result(Id=execution_id)
+            return bool(result.get("Records"))
+        time.sleep(2)
+    raise TimeoutError("Redshift schema lookup state uncertain; reconcile before retry")
+
+
 def sql_copy(table: str, key: str, bucket: str, role_arn: str) -> str:
     if not SAFE_S3_KEY.fullmatch(key):
         raise ValueError("Unsafe S3 path")
@@ -189,6 +214,8 @@ def main() -> None:
     data = session.client("redshift-data")
     ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/raw_schema.sql"
     ddl = [statement.strip() for statement in ddl_path.read_text().split(";") if statement.strip()]
+    if not raw_schema_exists(data, workgroup=args.workgroup, database=args.database):
+        ddl.insert(0, "CREATE SCHEMA raw")
     run_data_api(data, workgroup=args.workgroup, database=args.database, statements=ddl)
     for manifest_key, manifest, kind in plans:
         src = (synthetic_statements(args.bucket, args.copy_role_arn, manifest)
