@@ -1,5 +1,5 @@
 -- Raw warehouse landing. Synthetic events are NOT observed real-world sales.
-CREATE SCHEMA IF NOT EXISTS raw;
+-- The loader creates the raw schema after checking pg_namespace.
 
 CREATE TABLE IF NOT EXISTS raw.synthetic_orders (
   order_id VARCHAR(40), customer_id VARCHAR(40), source_system VARCHAR(40),
