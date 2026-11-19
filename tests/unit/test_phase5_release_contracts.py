@@ -60,3 +60,12 @@ def test_generator_dockerfile_normalizes_manifest_before_verifying_sha():
     assert "p.write_bytes(b)" in docker
     assert "hashlib.sha256(b).hexdigest()" in docker
     assert 'manifest_bytes.replace(b"\\r\\n", b"\\n")' in source
+
+def test_deployer_produces_lambda_compatible_single_platform_image():
+    deploy = (ROOT / "scripts/aws/deploy_phase5_once.ps1").read_text()
+    assert "docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load" in deploy
+    assert "imageManifestMediaType" in deploy
+    assert "application/vnd.docker.distribution.manifest.v2+json" in deploy
+    assert "application/vnd.oci.image.manifest.v1+json" in deploy
+    assert "Refusing Terraform apply" in deploy
+    assert "& docker --config $tempConfig push $imageTag" in deploy
