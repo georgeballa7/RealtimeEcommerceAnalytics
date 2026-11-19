@@ -34,5 +34,47 @@
     ],
     "approval_key": "historical/online_retail_ii/catalog_approval/v1/catalog-approval-unflagged-v1.json",
     "approval_sha256": "b348f9804564657828e55597df6cc18718933742f6d3b8a1165d2d49c18ab130"
+  },
+  "phase5_migration": {
+    "repository": "ecommerce-phase5-migration-demo",
+    "dockerfile": "Dockerfile.phase5-migration",
+    "task_family": "ecommerce-phase5-migration-demo",
+    "container": "phase5-migration",
+    "log_group": "/ecs/ecommerce-demo/phase5-migration",
+    "subnets": [
+      "subnet-0248e35f98ea3fbf6",
+      "subnet-0481cb476d153d5ba"
+    ],
+    "security_groups": [
+      "sg-0128bc9b086b7072b"
+    ]
+  },
+  "phase5_pricing": {
+    "repository": "ecommerce-phase5-pricing-demo",
+    "dockerfile": "Dockerfile.phase5-pricing",
+    "task_family": "ecommerce-phase5-pricing-demo",
+    "container": "phase5-pricing",
+    "log_group": "/ecs/ecommerce-demo/phase5-pricing",
+    "subnets": [
+      "subnet-0248e35f98ea3fbf6",
+      "subnet-0481cb476d153d5ba"
+    ],
+    "security_groups": [
+      "sg-0128bc9b086b7072b"
+    ]
+  },
+  "phase5_generator": {
+    "repository": "ecommerce-phase5-generator-demo",
+    "dockerfile": "Dockerfile.phase5-generator",
+    "task_family": "ecommerce-phase5-generator-demo",
+    "container": "phase5-generator",
+    "log_group": "/ecs/ecommerce-demo/phase5-generator",
+    "subnets": [
+      "subnet-0248e35f98ea3fbf6",
+      "subnet-0481cb476d153d5ba"
+    ],
+    "security_groups": [
+      "sg-0128bc9b086b7072b"
+    ]
   }
 }

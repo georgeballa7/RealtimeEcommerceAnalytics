@@ -241,3 +241,5 @@ infrastructure/terraform/terraform-graph.svg
 # Temporary Shopify diagnostic scripts
 /inspect_shopify_schema.py
 /verify_shopify.py
+# Single-release generated Terraform plan (stored at repository root)
+/.phase5-release.tfplan

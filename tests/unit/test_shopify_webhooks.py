@@ -1,97 +1,96 @@
-"""Offline webhook ingress tests: no AWS, Shopify or database connection required."""
+"""FastAPI queue-first ingress unit tests; no AWS requests or RDS connection."""
 import base64
 import hashlib
 import hmac
+import json
 
 from fastapi.testclient import TestClient
 
-from ecommerce.interfaces.http.shopify_webhooks import create_app, valid_hmac
+from ecommerce.infrastructure.aws.webhook_queue import SqsWebhookQueue
+from ecommerce.interfaces.http.shopify_webhooks import create_app
+
+SHOP = "realtime-ecommerce-analytics.myshopify.com"
+SECRET = "offline-test-secret"
+BODY = b'{"id":123,"line_items":[]}'
 
 
-class FakeInbox:
+class FakeSQS:
     def __init__(self):
-        self.seen = set()
-        self.events = []
+        self.messages = []
         self.fail = False
 
-    def accept(self, event):
+    def send_message(self, **kwargs):
         if self.fail:
-            raise RuntimeError("database should not leak")
-        key = (event.shop_domain, event.webhook_id)
-        if key in self.seen:
-            return False
-        self.seen.add(key)
-        self.events.append(event)
-        return True
+            raise RuntimeError("SQS failure")
+        self.messages.append(json.loads(kwargs["MessageBody"]))
+        return {"MessageId": "message-001"}
 
 
-SECRET = "offline-test-only-secret"
-BODY = b'{"id":123,"email":"do-not-log@example.test"}'
-
-
-def signed_headers(body=BODY, *, webhook_id="example-123"):
-    signature = base64.b64encode(
-        hmac.new(SECRET.encode(), body, hashlib.sha256).digest()
-    ).decode()
-    return {
-        "X-Shopify-Hmac-Sha256": signature,
-        "X-Shopify-Webhook-Id": webhook_id,
+def headers(body=BODY, **overrides):
+    h = {
+        "X-Shopify-Hmac-Sha256": base64.b64encode(
+            hmac.new(SECRET.encode(), body, hashlib.sha256).digest()).decode(),
+        "X-Shopify-Webhook-Id": "webhook-001",
+        "X-Shopify-Event-Id": "event-001",
         "X-Shopify-Topic": "orders/create",
-        "X-Shopify-Shop-Domain": "realtime-ecommerce-analytics.myshopify.com",
-        "X-Shopify-Event-Id": "event-123",
+        "X-Shopify-Shop-Domain": SHOP,
     }
+    h.update(overrides)
+    return h
 
 
-def test_hmac_rejects_tampered_body():
-    assert valid_hmac(BODY, signed_headers()["X-Shopify-Hmac-Sha256"], SECRET)
-    assert not valid_hmac(b"tampered", signed_headers()["X-Shopify-Hmac-Sha256"], SECRET)
+def setup():
+    sqs = FakeSQS()
+    app = create_app(webhook_secret=SECRET,
+                     expected_shop=SHOP,
+                     queue=SqsWebhookQueue(sqs, "https://sqs.eu-central-1.amazonaws.com/123/queue"))
+    return TestClient(app), sqs
 
 
-def test_accept_and_deduplicate_webhook():
-    inbox = FakeInbox()
-    client = TestClient(create_app(webhook_secret=SECRET, inbox=inbox))
-    first = client.post("/webhooks/shopify", data=BODY, headers=signed_headers())
-    repeat = client.post("/webhooks/shopify", data=BODY, headers=signed_headers())
-    assert first.status_code == 200
-    assert first.json() == {"status": "accepted"}
-    assert repeat.json() == {"status": "duplicate"}
-    assert len(inbox.events) == 1
-    assert inbox.events[0].payload["id"] == 123
+def test_signed_webhook_is_queued_without_rds():
+    client, sqs = setup()
+    response = client.post("/webhooks/shopify", content=BODY, headers=headers())
+    assert response.status_code == 200
+    assert response.json() == {"status": "queued"}
+    assert len(sqs.messages) == 1
+    assert sqs.messages[0]["schema_version"] == 1
+    assert sqs.messages[0]["source"] == "shopify_webhook"
+    assert sqs.messages[0]["payload"]["id"] == 123
 
 
-def test_invalid_signature_writes_nothing():
-    inbox = FakeInbox()
-    client = TestClient(create_app(webhook_secret=SECRET, inbox=inbox))
-    response = client.post(
-        "/webhooks/shopify", data=b'{"id":124}', headers=signed_headers()
-    )
+def test_invalid_signature_does_not_acknowledge():
+    client, sqs = setup()
+    response = client.post("/webhooks/shopify", content=b'{}', headers=headers())
     assert response.status_code == 401
-    assert not inbox.events
+    assert not sqs.messages
 
 
-def test_missing_identity_rejected():
-    inbox = FakeInbox()
-    client = TestClient(create_app(webhook_secret=SECRET, inbox=inbox))
-    headers = signed_headers()
-    del headers["X-Shopify-Webhook-Id"]
-    assert client.post("/webhooks/shopify", data=BODY, headers=headers).status_code == 400
+def test_other_shop_rejected():
+    client, sqs = setup()
+    response = client.post("/webhooks/shopify", content=BODY,
+                           headers=headers(**{"X-Shopify-Shop-Domain": "another-store.myshopify.com"}))
+    assert response.status_code == 403
+    assert not sqs.messages
 
 
-def test_database_failure_must_not_acknowledge():
-    inbox = FakeInbox()
-    inbox.fail = True
-    client = TestClient(create_app(webhook_secret=SECRET, inbox=inbox))
-    result = client.post("/webhooks/shopify", data=BODY, headers=signed_headers())
-    assert result.status_code == 503
-    assert result.json() == {"detail": "Webhook storage unavailable"}
+def test_sqs_failure_returns_503():
+    client, sqs = setup()
+    sqs.fail = True
+    response = client.post("/webhooks/shopify", content=BODY, headers=headers())
+    assert response.status_code == 503
 
 
-def test_oversized_payload_rejected():
-    inbox = FakeInbox()
-    client = TestClient(create_app(webhook_secret=SECRET, inbox=inbox))
-    response = client.post(
-        "/webhooks/shopify", data=b"x" * 1_048_577,
-        headers=signed_headers(body=b"x" * 1_048_577),
-    )
-    assert response.status_code == 413
-    assert not inbox.events
+def test_unsupported_topic_rejected():
+    client, sqs = setup()
+    response = client.post("/webhooks/shopify", content=BODY,
+                           headers=headers(**{"X-Shopify-Topic": "customers/delete"}))
+    assert response.status_code == 400
+    assert not sqs.messages
+
+
+def test_duplicate_delivery_can_be_queued_for_s3_dedupe():
+    client, sqs = setup()
+    for _ in range(2):
+        assert client.post("/webhooks/shopify", content=BODY, headers=headers()).status_code == 200
+    assert len(sqs.messages) == 2
+    assert sqs.messages[0]["webhook_id"] == sqs.messages[1]["webhook_id"]

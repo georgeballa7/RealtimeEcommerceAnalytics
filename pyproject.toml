@@ -11,7 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
-api = ["fastapi>=0.115", "uvicorn>=0.30"]
+api = ["fastapi>=0.115", "uvicorn>=0.30", "mangum>=0.19", "httpx>=0.27"]
 shopify = ["httpx>=0.27"]
 postgres = ["psycopg[binary]>=3.2"]
 aws = ["boto3>=1.35"]
@@ -24,7 +24,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration", "tests/e2e"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = [
     "integration: requires configured external services",
     "e2e: requires deployed integration environment",
@@ -33,3 +33,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# Enforce executable correctness while leaving cosmetic import/order rules for later cleanup.
+ignore = ["I001", "UP017", "C408", "SIM117", "FURB157", "FURB162", "BLE001", "RUF059"]

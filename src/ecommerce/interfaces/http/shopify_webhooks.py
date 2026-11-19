@@ -1,7 +1,6 @@
-"""Shopify webhook HTTP ingress with raw-body HMAC verification.
+"""Shopify HMAC-verified, RDS-independent FastAPI webhook ingress.
 
-Runtime credentials and database connection details must be injected via
-Secrets Manager-backed environment configuration. No customer payloads are logged.
+Acknowledge only after SQS confirms the event; RDS can remain stopped.
 """
 from __future__ import annotations
 
@@ -15,12 +14,15 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
-from ecommerce.infrastructure.postgres.webhook_inbox import (
-    IncomingWebhook,
-    PostgresWebhookInbox,
+from ecommerce.infrastructure.aws.webhook_queue import (
+    IncomingWebhook, SqsWebhookQueue, WebhookQueueError,
 )
 
-MAX_BODY_BYTES = 1_048_576
+MAX_BODY_BYTES = 1_000_000
+TOPICS = frozenset({
+    "orders/create", "orders/updated", "orders/cancelled",
+    "refunds/create", "orders/paid", "orders/fulfilled",
+})
 
 
 def valid_hmac(raw_body: bytes, header: str | None, secret: str) -> bool:
@@ -32,7 +34,6 @@ def valid_hmac(raw_body: bytes, header: str | None, secret: str) -> bool:
 
 
 def normalize_shop_domain(value: str | None) -> str:
-    """Never use the untrusted shop-domain header to construct a request URL."""
     if not value or len(value) > 253 or "/" in value or ":" in value:
         raise ValueError("Invalid Shopify shop domain")
     hostname = urlsplit("https://" + value.lower()).hostname
@@ -41,26 +42,21 @@ def normalize_shop_domain(value: str | None) -> str:
     return hostname
 
 
-def create_app(
-    *,
-    webhook_secret: str | None = None,
-    inbox: PostgresWebhookInbox | None = None,
-) -> FastAPI:
-    secret = webhook_secret if webhook_secret is not None else os.environ.get(
-        "SHOPIFY_WEBHOOK_SECRET", ""
-    )
+def create_app(*, webhook_secret: str | None = None,
+               queue: SqsWebhookQueue | None = None,
+               expected_shop: str | None = None) -> FastAPI:
+    secret = webhook_secret if webhook_secret is not None else os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
     if not secret:
         raise RuntimeError("SHOPIFY_WEBHOOK_SECRET is required")
+    shop = expected_shop if expected_shop is not None else os.environ.get("SHOPIFY_SHOP_DOMAIN", "")
+    if not shop:
+        raise RuntimeError("SHOPIFY_SHOP_DOMAIN is required")
+    shop = normalize_shop_domain(shop)
+    if queue is None:
+        import boto3
+        queue = SqsWebhookQueue(boto3.client("sqs"), os.environ.get("EVENT_QUEUE_URL", ""))
 
-    if inbox is None:
-        import psycopg
-
-        dsn = os.environ.get("WEBHOOK_DATABASE_URL", "")
-        if not dsn:
-            raise RuntimeError("WEBHOOK_DATABASE_URL is required")
-        inbox = PostgresWebhookInbox(lambda: psycopg.connect(dsn, connect_timeout=5))
-
-    app = FastAPI(title="E-Commerce Shopify Webhook Ingress")
+    app = FastAPI(title="Shopify Live Event Ingestion")
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -68,63 +64,55 @@ def create_app(
 
     @app.post("/webhooks/shopify")
     async def shopify_webhook(request: Request) -> dict[str, str]:
-        # Content-Length is only an early guard; the actual body is also checked.
         length_header = request.headers.get("content-length")
         if length_header:
             try:
                 length = int(length_header)
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+                raise HTTPException(400, "Invalid Content-Length") from exc
             if length > MAX_BODY_BYTES:
-                raise HTTPException(status_code=413, detail="Webhook payload too large")
-        # Stream to enforce the size limit even when Content-Length is absent.
+                raise HTTPException(413, "Webhook payload too large")
         chunks = []
-        length = 0
+        total = 0
         async for chunk in request.stream():
-            length += len(chunk)
-            if length > MAX_BODY_BYTES:
-                raise HTTPException(status_code=413, detail="Webhook payload too large")
+            total += len(chunk)
+            if total > MAX_BODY_BYTES:
+                raise HTTPException(413, "Webhook payload too large")
             chunks.append(chunk)
         raw = b"".join(chunks)
         if not valid_hmac(raw, request.headers.get("x-shopify-hmac-sha256"), secret):
-            raise HTTPException(status_code=401, detail="Invalid Shopify signature")
-
-        webhook_id = request.headers.get("x-shopify-webhook-id", "").strip()
-        topic = request.headers.get("x-shopify-topic", "").strip()
+            raise HTTPException(401, "Invalid Shopify signature")
+        webhook_id = (request.headers.get("x-shopify-webhook-id") or "").strip()
+        topic = (request.headers.get("x-shopify-topic") or "").strip()
         try:
-            shop_domain = normalize_shop_domain(
-                request.headers.get("x-shopify-shop-domain")
-            )
+            source_shop = normalize_shop_domain(request.headers.get("x-shopify-shop-domain"))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not webhook_id or len(webhook_id) > 200 or not topic or len(topic) > 200:
-            raise HTTPException(status_code=400, detail="Missing webhook identity")
-
+            raise HTTPException(400, "Invalid Shopify shop identity") from exc
+        if source_shop != shop:
+            raise HTTPException(403, "Unexpected Shopify shop")
+        if not webhook_id or len(webhook_id) > 200 or topic not in TOPICS:
+            raise HTTPException(400, "Unsupported Shopify event identity or topic")
+        event_id = request.headers.get("x-shopify-event-id")
+        if event_id is not None and len(event_id) > 200:
+            raise HTTPException(400, "Invalid Shopify event ID")
         try:
             payload = json.loads(raw)
         except (ValueError, UnicodeDecodeError) as exc:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+            raise HTTPException(400, "Invalid JSON payload") from exc
         if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="Expected JSON object")
-
-        event = IncomingWebhook(
-            shop_domain=shop_domain,
-            webhook_id=webhook_id,
-            event_id=request.headers.get("x-shopify-event-id"),
-            topic=topic,
-            payload=payload,
-        )
+            raise HTTPException(400, "Expected JSON object")
+        event = IncomingWebhook(source_shop, webhook_id, event_id, topic, payload)
         try:
-            created = await run_in_threadpool(inbox.accept, event)
-        except Exception as exc:
-            # Do not leak DB internals, connection strings or customer payloads.
-            raise HTTPException(status_code=503, detail="Webhook storage unavailable") from exc
-        return {"status": "accepted" if created else "duplicate"}
+            await run_in_threadpool(queue.accept, event)
+        except ValueError as exc:
+            raise HTTPException(413, "Webhook envelope exceeds transport limit") from exc
+        except WebhookQueueError as exc:
+            raise HTTPException(503, "Webhook queue unavailable") from exc
+        return {"status": "queued"}
 
     return app
 
 
-# Defer application initialization until the HTTP process boots.
-# Use: uvicorn ecommerce.interfaces.http.shopify_webhooks:app --factory
 def app() -> FastAPI:
+    """ASGI factory for uvicorn; Lambda handler wraps the same FastAPI app."""
     return create_app()
