@@ -1,0 +1,38 @@
+version: 2
+models:
+  - name: fct_orders
+    description: Synthetic historical and Shopify orders, source-tagged; live orders may also be synthetic.
+    columns:
+      - name: order_key
+        data_tests: [not_null, unique]
+      - name: currency
+        data_tests:
+          - accepted_values:
+              values: ['GBP']
+  - name: fct_order_lines
+    columns:
+      - name: line_key
+        data_tests: [not_null, unique]
+      - name: order_key
+        data_tests:
+          - relationships:
+              to: ref('fct_orders')
+              field: order_key
+  - name: fct_cancellations
+    columns:
+      - name: cancellation_key
+        data_tests: [not_null, unique]
+  - name: fct_refund_lines
+    columns:
+      - name: refund_line_key
+        data_tests: [not_null, unique]
+  - name: dim_customers
+    columns:
+      - name: customer_key
+        data_tests: [not_null, unique]
+  - name: mart_customer_churn_training
+    columns:
+      - name: churn_next_30d
+        data_tests:
+          - accepted_values:
+              values: [0, 1]

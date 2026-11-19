@@ -1,0 +1,25 @@
+version: 2
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: synthetic_orders
+        columns:
+          - name: order_id
+            data_tests: [not_null]
+      - name: synthetic_order_items
+        columns:
+          - name: order_item_id
+            data_tests: [not_null]
+      - name: synthetic_cancellations
+        columns:
+          - name: event_id
+            data_tests: [not_null]
+      - name: shopify_live_order
+        columns:
+          - name: shopify_order_id
+            data_tests: [not_null]
+      - name: shopify_live_order_line
+      - name: shopify_live_refund
+      - name: shopify_live_refund_line
+      - name: shopify_customer_identity
