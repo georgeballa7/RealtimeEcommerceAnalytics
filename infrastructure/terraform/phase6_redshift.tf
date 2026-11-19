@@ -63,13 +63,13 @@ resource "aws_iam_role_policy" "redshift_s3_copy" {
 }
 
 resource "aws_redshiftserverless_namespace" "analytics" {
-  count                = var.enable_redshift_warehouse ? 1 : 0
-  namespace_name       = "ecommerce-analytics-${var.environment}"
-  db_name              = "analytics"
+  count                 = var.enable_redshift_warehouse ? 1 : 0
+  namespace_name        = "ecommerce-analytics-${var.environment}"
+  db_name               = "analytics"
   manage_admin_password = true
-  iam_roles            = [aws_iam_role.redshift_s3_copy[0].arn]
-  default_iam_role_arn = aws_iam_role.redshift_s3_copy[0].arn
-  log_exports          = ["userlog", "connectionlog", "useractivitylog"]
+  iam_roles             = [aws_iam_role.redshift_s3_copy[0].arn]
+  default_iam_role_arn  = aws_iam_role.redshift_s3_copy[0].arn
+  log_exports           = ["userlog", "connectionlog", "useractivitylog"]
 }
 
 resource "aws_security_group" "redshift_analytics" {
@@ -81,16 +81,16 @@ resource "aws_security_group" "redshift_analytics" {
 }
 
 resource "aws_redshiftserverless_workgroup" "analytics" {
-  count                 = var.enable_redshift_warehouse ? 1 : 0
-  workgroup_name        = "ecommerce-analytics-${var.environment}"
-  namespace_name        = aws_redshiftserverless_namespace.analytics[0].namespace_name
-  base_capacity         = 4
-  max_capacity          = 8
-  publicly_accessible   = false
-  enhanced_vpc_routing  = false # Existing app subnets span two AZs.
-  subnet_ids            = aws_subnet.application[*].id
-  security_group_ids    = [aws_security_group.redshift_analytics[0].id]
-  tags                  = { Project = "RealtimeEcommerceAnalytics", CostCenter = "demo" }
+  count                = var.enable_redshift_warehouse ? 1 : 0
+  workgroup_name       = "ecommerce-analytics-${var.environment}"
+  namespace_name       = aws_redshiftserverless_namespace.analytics[0].namespace_name
+  base_capacity        = 4
+  max_capacity         = 8
+  publicly_accessible  = false
+  enhanced_vpc_routing = false # Existing app subnets span two AZs.
+  subnet_ids           = aws_subnet.application[*].id
+  security_group_ids   = [aws_security_group.redshift_analytics[0].id]
+  tags                 = { Project = "RealtimeEcommerceAnalytics", CostCenter = "demo" }
 }
 
 variable "redshift_monthly_rpu_hour_limit" {

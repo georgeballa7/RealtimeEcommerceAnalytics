@@ -37,7 +37,7 @@ resource "aws_iam_role_policy" "phase6_rds_exporter_s3" {
       Effect   = "Allow"
       Action   = ["s3:GetObject", "s3:PutObject"]
       Resource = "${aws_s3_bucket.landing.arn}/warehouse/live_exports/v1/*"
-    }, {
+      }, {
       Effect   = "Allow"
       Action   = ["s3:ListBucket"]
       Resource = aws_s3_bucket.landing.arn
