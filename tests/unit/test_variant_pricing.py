@@ -19,7 +19,7 @@ class FakeGraphQL:
 def test_variant_read_checks_identity():
     api = FakeGraphQL({"productVariant": {
         "id": "gid://shopify/ProductVariant/2", "sku": "A", "price": "2.15",
-        "product": {"id": "gid://shopify/Product/1"}})
+        "product": {"id": "gid://shopify/Product/1"}}})
     assert ShopifyVariantPricing(api).read(
         sku="A", product_gid="gid://shopify/Product/1",
         variant_gid="gid://shopify/ProductVariant/2") == Decimal("2.15")
