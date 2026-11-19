@@ -243,3 +243,11 @@ infrastructure/terraform/terraform-graph.svg
 /verify_shopify.py
 # Single-release generated Terraform plan (stored at repository root)
 /.phase5-release.tfplan
+
+# Local warehouse training artifacts and secrets
+mlruns/
+ml/churn/output/
+analytics/dbt/target/
+analytics/dbt/logs/
+analytics/dbt/dbt_packages/
+analytics/dbt/profiles.yml
