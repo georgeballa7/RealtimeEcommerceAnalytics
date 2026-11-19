@@ -1,0 +1,19 @@
+# One-off 3,408-SKU price reconciliation; no automatic Shopify mutations.
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 AWS_DEFAULT_REGION=eu-central-1
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl --fail --show-error --silent \
+       https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+       -o /etc/ssl/certs/rds-global-bundle.pem \
+    && test -s /etc/ssl/certs/rds-global-bundle.pem \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/app
+COPY pyproject.toml ./
+COPY src/ ./src/
+COPY scripts/sync_gbp_variant_prices.py ./scripts/sync_gbp_variant_prices.py
+COPY config/catalog/phase5-gbp-sku-prices-v1.json ./config/catalog/phase5-gbp-sku-prices-v1.json
+RUN pip install --no-cache-dir ".[shopify,postgres]" \
+    && useradd --system --uid 10001 ecommerce
+USER ecommerce
+ENTRYPOINT ["python", "scripts/sync_gbp_variant_prices.py"]

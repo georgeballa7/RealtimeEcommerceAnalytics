@@ -23,3 +23,19 @@ only after an independent Shopify read confirms the actual current price. This i
 not an atomic multi-system transaction, so a failed run must be reconciled before retry.
 
 No S3 operational artifact or historical Silver mutation is performed by this runner.
+
+## Deployment with the existing Docker credential-helper workaround
+
+Use `scripts/aws/publish_ecr_image.ps1 -Workload phase5_pricing` to build/push
+without Docker login (its temporary `DOCKER_CONFIG` contains ECR credentials
+only during the push). Publish an immutable digest and enable the on-demand
+task definition through `phase5_pricing_image` after reviewing Terraform plan.
+
+For a preflight ECS task, use the default command `["--limit","3408"]`.
+For the authorized **single full-catalog run**, override command to:
+`["--apply","--limit","3408","--confirm-sha256","7850c9f5faaea304b0d42c468a10179c8d44905f5ca82b7767e7497152fb2c06"]`.
+
+Do not launch this task until RDS migration 007 and the app-role grants have
+been verified. A restart performs independent Shopify reads and will skip
+already-matching writes. All 3,408 SKUs are processed in one ECS execution;
+each successful price is committed separately to RDS.

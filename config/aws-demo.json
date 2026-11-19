@@ -48,5 +48,19 @@
     "security_groups": [
       "sg-0128bc9b086b7072b"
     ]
+  },
+  "phase5_pricing": {
+    "repository": "ecommerce-phase5-pricing-demo",
+    "dockerfile": "Dockerfile.phase5-pricing",
+    "task_family": "ecommerce-phase5-pricing-demo",
+    "container": "phase5-pricing",
+    "log_group": "/ecs/ecommerce-demo/phase5-pricing",
+    "subnets": [
+      "subnet-0248e35f98ea3fbf6",
+      "subnet-0481cb476d153d5ba"
+    ],
+    "security_groups": [
+      "sg-0128bc9b086b7072b"
+    ]
   }
 }
