@@ -13,7 +13,7 @@ The 2026 synthetic source currently covers 2026-01-01 through 2026-11-18T23:10:1
 ## Cost and deployment
 
 - Optional Terraform resource `infrastructure/terraform/phase6_redshift.tf` defaults to `enable_redshift_warehouse=false`.
-- 4-RPU base, max 8 RPU, daily 8 RPU-hour cutoff with `deactivate`; **not a monthly-dollar hard cap**. Storage, logs, transfers and dependencies may incur additional charges.
+- 4-RPU base, max 8 RPU, daily 8 RPU-hour cutoff plus a **monthly 16 RPU-hour** cutoff with `deactivate`; around 4 hours of base-capacity compute monthly if it never scales. Neither threshold is a dollar cap or a guarantee against overage, in-flight billing, storage or ancillary charges. Based on a Frankfurt reference rate of $0.451 per RPU-hour, 16 RPU-hours corresponds to ~$7.22 of warehouse compute (subject to AWS billing rates and change).
 - Two application subnets in two AZs, enhanced VPC routing OFF, private workgroup; query with Data API. Reconcile actual account costs after first load.
 - RDS remains independent and can stop between ingestion windows. An automated always-on RDS zero-ETL integration is intentionally not enabled because this demo uses a stop/start RDS controller.
 - Terraform state must remain authoritative. Do not manually create a second workgroup outside its state.

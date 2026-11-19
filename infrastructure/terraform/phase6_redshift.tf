@@ -93,12 +93,33 @@ resource "aws_redshiftserverless_workgroup" "analytics" {
   tags                  = { Project = "RealtimeEcommerceAnalytics", CostCenter = "demo" }
 }
 
+variable "redshift_monthly_rpu_hour_limit" {
+  type        = number
+  default     = 16
+  description = "Maximum monthly compute RPU-hours before workgroup deactivation (not a total USD cap)."
+  validation {
+    condition     = var.redshift_monthly_rpu_hour_limit >= 4 && var.redshift_monthly_rpu_hour_limit <= 32 && floor(var.redshift_monthly_rpu_hour_limit) == var.redshift_monthly_rpu_hour_limit
+    error_message = "Select an integer monthly limit between 4 and 32 RPU-hours."
+  }
+}
+
 resource "aws_redshiftserverless_usage_limit" "analytics_daily" {
   count         = var.enable_redshift_warehouse ? 1 : 0
   resource_arn  = aws_redshiftserverless_workgroup.analytics[0].arn
   usage_type    = "serverless-compute"
   period        = "daily"
   amount        = var.redshift_daily_rpu_hour_limit
+  breach_action = "deactivate"
+}
+
+# A separate monthly ceiling prevents daily reactivation from exhausting the
+# overall demo account budget. This is not an absolute dollar spending cap.
+resource "aws_redshiftserverless_usage_limit" "analytics_monthly" {
+  count         = var.enable_redshift_warehouse ? 1 : 0
+  resource_arn  = aws_redshiftserverless_workgroup.analytics[0].arn
+  usage_type    = "serverless-compute"
+  period        = "monthly"
+  amount        = var.redshift_monthly_rpu_hour_limit
   breach_action = "deactivate"
 }
 

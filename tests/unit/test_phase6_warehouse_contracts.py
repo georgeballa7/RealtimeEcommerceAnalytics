@@ -9,6 +9,9 @@ def test_warehouse_disabled_until_explicit_opt_in():
     assert 'variable "enable_redshift_warehouse"' in terraform
     assert "default     = false" in terraform
     assert 'breach_action = "deactivate"' in terraform
+    assert 'variable "redshift_monthly_rpu_hour_limit"' in terraform
+    assert '"analytics_monthly"' in terraform
+    assert 'period        = "monthly"' in terraform
     assert "base_capacity         = 4" in terraform
     assert "publicly_accessible   = false" in terraform
 
