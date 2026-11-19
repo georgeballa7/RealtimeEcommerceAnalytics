@@ -204,6 +204,7 @@ resource "aws_lambda_event_source_mapping" "phase5_landing" {
   batch_size = 1
   enabled = true # Subscriber is registered only after schema migration completes
   function_response_types = ["ReportBatchItemFailures"]
+  depends_on = [aws_iam_role_policy.phase5_event_landing]
 }
 resource "aws_apigatewayv2_api" "phase5" {
   count = local.phase5_live_ready ? 1 : 0

@@ -14,3 +14,21 @@ check "phase5_atomic_configuration" {
     error_message = "Phase 5 deployment requires all four immutable images, Shopify credentials, and shop domain together."
   }
 }
+
+resource "terraform_data" "phase5_release_contract" {
+  input = "Phase 5 one-release configuration"
+  lifecycle {
+    precondition {
+      condition = (
+        (var.phase5_lambda_image == "" && var.phase5_projector_image == "" &&
+         var.phase5_generator_image == "" && var.phase5_lifecycle_image == "") ||
+        (var.phase5_lambda_image != "" && var.phase5_projector_image != "" &&
+         var.phase5_generator_image != "" && var.phase5_lifecycle_image != "" &&
+         var.shopify_webhook_secret_arn != "" &&
+         var.shopify_client_credentials_secret_arn != "" &&
+         var.shopify_shop_domain != "")
+      )
+      error_message = "All four Phase 5 images and Shopify app credentials must be supplied together."
+    }
+  }
+}

@@ -147,6 +147,7 @@ resource "aws_scheduler_schedule" "phase5_generation" {
   schedule_expression = each.value.cron
   schedule_expression_timezone = "Europe/Berlin"
   flexible_time_window { mode = "OFF" }
+  depends_on = [aws_iam_role_policy.phase5_scheduler]
   target {
     arn = aws_ecs_cluster.ecommerce.arn
     role_arn = aws_iam_role.phase5_scheduler.arn

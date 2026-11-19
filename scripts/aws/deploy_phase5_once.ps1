@@ -67,8 +67,9 @@ try {
         foreach ($kind in $repositories.Keys) {
             $name = $repositories[$kind]
             $address = 'aws_ecr_repository.phase5_' + $kind
-            $null = & aws ecr describe-repositories --repository-names $name --region $Region --profile $AwsProfile 2>$null
-            if ($LASTEXITCODE -ne 0) {
+            $existingRepo = (& aws ecr describe-repositories --region $Region --profile $AwsProfile --query "repositories[?repositoryName=='$name'].repositoryName | [0]" --output text).Trim()
+            Assert-Exit "Inspect ECR repository $name"
+            if (-not $existingRepo -or $existingRepo -eq 'None') {
                 & aws ecr create-repository --repository-name $name --image-tag-mutability IMMUTABLE --image-scanning-configuration scanOnPush=true --region $Region --profile $AwsProfile | Out-Null
                 Assert-Exit "Create ECR repository $name"
             }
@@ -95,8 +96,9 @@ try {
         $imageDigests = @{}
         foreach ($kind in $repositories.Keys) {
             $name = $repositories[$kind]
-            $digest = (& aws ecr describe-images --repository-name $name --image-ids "imageTag=$tag" --profile $AwsProfile --region $Region --query 'imageDetails[0].imageDigest' --output text 2>$null)
-            if ($LASTEXITCODE -ne 0 -or -not $digest -or $digest -eq 'None') {
+            $digest = (& aws ecr list-images --repository-name $name --filter tagStatus=TAGGED --profile $AwsProfile --region $Region --query "imageIds[?imageTag=='$tag'].imageDigest | [0]" --output text).Trim()
+            Assert-Exit "Inspect image tag $kind"
+            if (-not $digest -or $digest -eq 'None') {
                 $uri = "$registry/$name"
                 $imageTag = [string]::Format('{0}:{1}', $uri, $tag)
                 Write-Host "Building $kind from $($dockerFiles[$kind])"
