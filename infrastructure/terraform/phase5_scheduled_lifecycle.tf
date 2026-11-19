@@ -114,10 +114,13 @@ resource "aws_iam_role_policy" "phase5_scheduler" {
       {
         Effect = "Allow"
         Action = ["ecs:RunTask"]
-        Resource = concat(
-          aws_ecs_task_definition.phase5_generator[*].arn,
-          aws_ecs_task_definition.phase5_lifecycle[*].arn
-        )
+        # Restrict scheduler launches to the two Phase 5 task families.
+        # Keep scope valid across digest-pinned revisions; changing the revision
+        # must not silently disable the scheduled generator.
+        Resource = [
+          "arn:aws:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/ecommerce-phase5-generator-${var.environment}:*",
+          "arn:aws:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/ecommerce-phase5-lifecycle-${var.environment}:*"
+        ]
         Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.ecommerce.arn } }
       },
       {

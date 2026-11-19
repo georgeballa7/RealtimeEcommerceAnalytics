@@ -10,12 +10,11 @@ mutation=True) interface. The caller owns the durable S3 operation journal.
 from __future__ import annotations
 
 import hashlib
-import json
 import random
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid5, NAMESPACE_URL
+from uuid import uuid5, NAMESPACE_URL
 
 ORDER_QUERY = """query Phase5Order($id: ID!) {
   order(id: $id) {

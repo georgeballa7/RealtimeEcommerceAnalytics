@@ -1,5 +1,4 @@
 from decimal import Decimal
-from uuid import uuid4
 import pytest
 from ecommerce.application.use_cases.shopify_price_reconciliation import reconcile_targets
 from ecommerce.infrastructure.shopify.variant_pricing import ShopifyVariantPricing

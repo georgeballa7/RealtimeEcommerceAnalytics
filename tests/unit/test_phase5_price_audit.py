@@ -1,6 +1,5 @@
 """Pure SQL result validation for Phase 5 read-only audit."""
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from ecommerce.application.use_cases.phase5_price_audit import audit_price_state
 

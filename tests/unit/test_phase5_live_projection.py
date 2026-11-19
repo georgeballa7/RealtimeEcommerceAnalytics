@@ -1,6 +1,3 @@
-import hashlib
-import json
-from datetime import timezone
 from decimal import Decimal
 import pytest
 from ecommerce.application.use_cases.live_order_projection import (
