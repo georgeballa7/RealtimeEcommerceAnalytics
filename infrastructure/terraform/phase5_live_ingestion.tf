@@ -79,6 +79,7 @@ resource "aws_iam_role_policy" "phase5_projector" {
   name = "read-landed-events-update-checkpoints"
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["s3:GetObject"], Resource = "${aws_s3_bucket.landing.arn}/events/shopify/v1/*" },
+    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.landing.arn },
     { Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:UpdateItem"], Resource = aws_dynamodb_table.phase5_events.arn },
     { Effect = "Allow", Action = ["dynamodb:Query"], Resource = "${aws_dynamodb_table.phase5_events.arn}/index/by_state" }
   ] })
@@ -148,6 +149,7 @@ resource "aws_iam_role_policy" "phase5_event_landing" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"], Resource = aws_sqs_queue.events.arn },
     { Effect = "Allow", Action = ["s3:PutObject", "s3:GetObject"], Resource = "${aws_s3_bucket.landing.arn}/events/shopify/v1/*" },
+    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.landing.arn },
     { Effect = "Allow", Action = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem"], Resource = [aws_dynamodb_table.phase5_events.arn, aws_dynamodb_table.phase5_controller.arn] },
     { Effect = "Allow", Action = ["lambda:InvokeFunction"], Resource = local.phase5_live_ready ? [aws_lambda_function.phase5_controller[0].arn] : [] }
   ] })

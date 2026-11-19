@@ -53,3 +53,14 @@ def test_automatic_rds_stop_enabled_with_controller_guards():
     assert 'ALLOW_AUTOMATIC_RDS_STOP = "true"' in TF
     assert 'RDS_IDLE_MINUTES = "30"' in TF
     assert 'state = "ENABLED"' in TF
+
+
+def test_phase5_s3_readers_can_distinguish_missing_objects_from_access_denied():
+    generator = (Path(__file__).resolve().parents[2] / "infrastructure/terraform/phase5_generator.tf").read_text()
+    lifecycle = (Path(__file__).resolve().parents[2] / "infrastructure/terraform/phase5_scheduled_lifecycle.tf").read_text()
+    assert "s3:ListBucket" in generator
+    assert "s3:ListBucket" in lifecycle
+    for name in ("phase5_projector", "phase5_event_landing"):
+        policy = block(name)
+        assert '"s3:ListBucket"' in policy
+        assert 'Resource = aws_s3_bucket.landing.arn' in policy
