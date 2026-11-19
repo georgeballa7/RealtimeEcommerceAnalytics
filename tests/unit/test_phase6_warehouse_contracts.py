@@ -14,7 +14,7 @@ def test_warehouse_disabled_until_explicit_opt_in():
     assert '"analytics_monthly"' in terraform
     assert 'period        = "monthly"' in terraform
     assert re.search(r"\bbase_capacity\s*=\s*4\b", terraform)
-    assert "publicly_accessible   = false" in terraform
+    assert re.search(r"\bpublicly_accessible\s*=\s*false\b", terraform)
 
 
 def test_rds_export_has_no_mutation_or_long_lived_credentials():
