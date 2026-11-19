@@ -1,4 +1,5 @@
 """Phase 6 offline contract guards; no AWS account or warehouse is required."""
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -12,7 +13,7 @@ def test_warehouse_disabled_until_explicit_opt_in():
     assert 'variable "redshift_monthly_rpu_hour_limit"' in terraform
     assert '"analytics_monthly"' in terraform
     assert 'period        = "monthly"' in terraform
-    assert "base_capacity         = 4" in terraform
+    assert re.search(r"\bbase_capacity\s*=\s*4\b", terraform)
     assert "publicly_accessible   = false" in terraform
 
 
