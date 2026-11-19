@@ -8,8 +8,8 @@ import json
 import re
 
 _PENNY = Decimal("0.01")
-_PRODUCT = re.compile(r"gid://shopify/Product/[0-9]+\\Z")
-_VARIANT = re.compile(r"gid://shopify/ProductVariant/[0-9]+\\Z")
+_PRODUCT = re.compile(r"gid://shopify/Product/[0-9]+\Z")
+_VARIANT = re.compile(r"gid://shopify/ProductVariant/[0-9]+\Z")
 
 
 @dataclass(frozen=True)
