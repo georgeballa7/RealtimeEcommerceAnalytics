@@ -19,3 +19,13 @@ def test_refunds_are_not_reported_as_cash_payments():
 def test_projector_checks_tls_root_ca():
     code = (ROOT / "src/ecommerce/interfaces/workers/phase5_project_s3.py").read_text()
     assert 'Path(os.environ["DB_SSLROOTCERT"]).is_file()' in code
+
+
+def test_deployer_reuses_temporary_docker_ecr_push_workaround():
+    """Never regress to Docker Desktop's failing ECR login on Windows."""
+    deploy = (ROOT / "scripts/aws/deploy_phase5_once.ps1").read_text()
+    assert "& docker login" not in deploy
+    assert "& docker push " not in deploy
+    assert "& docker --config $tempConfig push $imageTag" in deploy
+    assert "Remove-Item -LiteralPath $tempConfig -Recurse -Force" in deploy
+    assert "get-login-password" in deploy
