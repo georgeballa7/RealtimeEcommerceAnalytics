@@ -36,7 +36,7 @@ CUSTOMERS = """query GeneratorCustomers($after: String) {
 CREATE = """mutation GeneratorCreate($input: DraftOrderInput!) {
   draftOrderCreate(input: $input) {
     draftOrder { id status }
-    userErrors { code field }
+    userErrors { field message }
   }
 }"""
 COMPLETE = """mutation GeneratorComplete($id: ID!) {

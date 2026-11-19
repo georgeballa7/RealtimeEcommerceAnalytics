@@ -78,3 +78,11 @@ def test_deployer_checks_image_digest_and_manifest_before_terraform():
     assert "Refusing Terraform apply." in deploy
     workflow = (ROOT / ".github/workflows/ops-powershell-ci.yml").read_text()
     assert "feature/shopify-live-event-generator" in workflow
+
+
+def test_shopify_draft_order_create_does_not_query_nonexistent_usererror_code():
+    source = (ROOT / "scripts/generate_shopify_live_orders.py").read_text()
+    create = source.split('CREATE = """', 1)[1].split('"""', 1)[0]
+    assert 'draftOrderCreate(input: $input)' in create
+    assert 'userErrors { field message }' in create
+    assert 'userErrors { code' not in create
