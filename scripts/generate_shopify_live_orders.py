@@ -12,7 +12,7 @@ import json
 import os
 import random
 import re
-import sys
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -24,7 +24,7 @@ from ecommerce.infrastructure.shopify.client import (
 PRODUCTS = """query GeneratorProducts($after: String) {
   products(first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
-    nodes { id status variants(first: 100) { nodes { id sku price } pageInfo { hasNextPage } } }
+    nodes { id status variants(first: 5) { nodes { id sku price } pageInfo { hasNextPage } } }
   }
 }"""
 CUSTOMERS = """query GeneratorCustomers($after: String) {
@@ -64,6 +64,7 @@ def paginate(gql, query: str, field: str) -> list[dict]:
         if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
             raise RuntimeError("Shopify pagination failed closed")
         cursor = next_cursor
+        time.sleep(3 if field == 'products' else 1)
     raise RuntimeError("Shopify result exceeds configured pagination safety cap")
 
 
