@@ -75,7 +75,7 @@ function global:terraform {
                 throw 'Unexpected show arguments'
             }
             if ($global:MockUnsafe) {
-                return '{"resource_changes":[{"address":"aws_scheduler_schedule.phase5_generation[\\"morning\\"]","change":{"actions":["update"]}}]}'
+                return '{"resource_changes":[{"address":"aws_scheduler_schedule.phase5_generation","change":{"actions":["update"]}}]}'
             }
             return '{"resource_changes":[{"address":"aws_glue_job.phase6_shopify_silver[0]","change":{"actions":["create"]}}]}'
         }
