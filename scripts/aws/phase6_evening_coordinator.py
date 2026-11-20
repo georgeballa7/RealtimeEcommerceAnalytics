@@ -217,8 +217,41 @@ def handler(event, context):
             raise
         previous = {"day": day, "phase": "reserved", "owner": owner, "batch_id": batch}
     phase = previous["phase"]
-    if phase in ("dispatched", "failed"):
+    if phase in ("completed", "failed", "warehouse_failed"):
         return log(phase, slot=slot, batch=previous["batch_id"])
+    if phase == "dispatched":
+        attempts = int(previous.get("loader_attempts", 1))
+        last = int(previous.get("loader_last_attempt_at", 0))
+        if int(now.timestamp()) - last < 20 * 60:
+            return log("warehouse_pending", slot=slot, attempts=attempts)
+        if attempts >= 3:
+            table.update_item(
+                Key={"id": day_id},
+                UpdateExpression="SET #phase=:failed",
+                ConditionExpression="#phase=:dispatched",
+                ExpressionAttributeNames={"#phase": "phase"},
+                ExpressionAttributeValues={
+                    ":failed": "warehouse_failed", ":dispatched": "dispatched"},
+            )
+            return log("warehouse_failed", slot=slot, reason="loader_ack_timeout")
+        table.update_item(
+            Key={"id": day_id},
+            UpdateExpression="SET loader_attempts=:attempts, loader_last_attempt_at=:now",
+            ConditionExpression="#phase=:dispatched",
+            ExpressionAttributeNames={"#phase": "phase"},
+            ExpressionAttributeValues={
+                ":attempts": attempts + 1, ":now": int(now.timestamp()),
+                ":dispatched": "dispatched"},
+        )
+        response = aws.client("lambda").invoke(
+            FunctionName=LOADER, InvocationType="Event",
+            Payload=json.dumps({
+                "source": "phase6-" + slot, "run_id": previous["run_id"],
+                "batch_id": previous["batch_id"]}).encode(),
+        )
+        if response.get("StatusCode") != 202:
+            raise RuntimeError("Silver loader retry invocation was not accepted")
+        return log("warehouse_loader_reinvoked", slot=slot, attempts=attempts + 1)
     owner = previous["owner"]
     renew(table, owner, int(now.timestamp()))
     if phase == "reserved":
