@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -130,6 +131,8 @@ def main():
     ap.add_argument("--refund-line", help="Existing Shopify line-item GID")
     ap.add_argument("--refund-quantity", type=int)
     ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--require-settled", action="store_true",
+                    help="Fail closed unless every selected lifecycle operation settles")
     args = ap.parse_args()
     if args.apply != args.confirm_apply:
         ap.error("Applying mutations requires --apply --confirm-apply")
@@ -183,11 +186,36 @@ def main():
                           if (journal.get(op.key) or {}).get("state") != "complete"]
             operations.sort(key=lambda op: (op.requested_at, op.key))
         stats = {"mode": "APPLY" if args.apply else "PREVIEW", "seen": 0, "outcomes": {}}
+        if args.require_settled and (not args.apply or len(operations) > args.limit):
+            raise RuntimeError("Scheduled lifecycle cannot certify an incomplete or preview batch")
+        pending = []
         for o in operations:
-            if stats["seen"] >= args.limit: break
+            if stats["seen"] >= args.limit:
+                break
             result = advance(gql, journal, o, now=now, allow_mutations=args.apply)
             stats["seen"] += 1
             stats["outcomes"][result] = stats["outcomes"].get(result, 0) + 1
+            if result in {"pending", "awaiting_shopify_state"}:
+                pending.append(o)
+        # Shopify cancellation is asynchronous. Never publish a finished slot
+        # merely because its mutation job was accepted. Poll idempotently.
+        if args.require_settled:
+            for _ in range(12):
+                if not pending:
+                    break
+                time.sleep(20)
+                remaining = []
+                for o in pending:
+                    result = advance(
+                        gql, journal, o, now=datetime.now(timezone.utc),
+                        allow_mutations=True)
+                    stats["outcomes"][result] = stats["outcomes"].get(result, 0) + 1
+                    if result in {"pending", "awaiting_shopify_state"}:
+                        remaining.append(o)
+                pending = remaining
+            if pending:
+                raise RuntimeError(
+                    f"Scheduled lifecycle still has {len(pending)} unsettled Shopify operations")
         print(json.dumps(stats, sort_keys=True))
 
 if __name__ == "__main__":
