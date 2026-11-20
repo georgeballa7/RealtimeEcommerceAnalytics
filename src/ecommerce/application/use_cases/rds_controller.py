@@ -9,6 +9,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+# Stored on the existing controller item; distinct from its 50-second lock.
+GLUE_LEASE_OWNER = "glue_lease_owner"
+GLUE_LEASE_EXPIRES_AT = "glue_lease_expires_at"
+GLUE_LEASE_JOB_RUN_ID = "glue_lease_job_run_id"
+GLUE_ACTIVE_STATES = frozenset(("STARTING", "RUNNING", "STOPPING", "WAITING"))
+
 
 class ControllerBusy(RuntimeError):
     pass
@@ -21,7 +27,7 @@ class ProjectionFailed(RuntimeError):
 class RdsController:
     def __init__(self, *, db, ecs, index, control, db_identifier, cluster,
                  task_definition, subnets, security_groups, idle_minutes=30,
-                 automatic_stop_enabled=False):
+                 automatic_stop_enabled=False, glue=None, glue_job_name=None):
         if idle_minutes < 10:
             raise ValueError("RDS idle window must be at least 10 minutes")
         self.db, self.ecs, self.index, self.control = db, ecs, index, control
@@ -29,6 +35,8 @@ class RdsController:
         self.task_definition, self.subnets, self.security_groups = task_definition, subnets, security_groups
         self.idle = timedelta(minutes=idle_minutes)
         self.automatic_stop_enabled = automatic_stop_enabled
+        self.glue = glue
+        self.glue_job_name = glue_job_name
 
     def _lock(self, now):
         from botocore.exceptions import ClientError
@@ -101,6 +109,38 @@ class RdsController:
             raise ProjectionFailed("ECS projection task failed; RDS stays available")
         return "complete"
 
+    def _glue_lease_blocker(self, state, now):
+        """Return a stop blocker while a lease or tracked Glue job is active.
+
+        Expired leases are only released after an authoritative Glue status
+        check. Inability to check is fail-closed (retain RDS, surface logs).
+        """
+        owner = state.get(GLUE_LEASE_OWNER)
+        if not owner:
+            return None
+        expires = state.get(GLUE_LEASE_EXPIRES_AT)
+        if not isinstance(expires, int):
+            return "glue_lease_invalid"
+        if expires > int(now.timestamp()):
+            return "glue_lease_active"
+        run_id = state.get(GLUE_LEASE_JOB_RUN_ID)
+        if not run_id:
+            # A launcher can crash before StartJobRun; the expired reservation
+            # may be reclaimed, provided no job was started out of band.
+            return None
+        if not self.glue or not self.glue_job_name:
+            return "glue_lease_unverifiable"
+        try:
+            run = self.glue.get_job_run(JobName=self.glue_job_name, RunId=run_id)
+            job_state = run["JobRun"]["JobRunState"]
+        except Exception:
+            return "glue_lease_unverifiable"
+        if job_state in GLUE_ACTIVE_STATES:
+            return "glue_job_running"
+        if job_state not in ("SUCCEEDED", "FAILED", "TIMEOUT", "STOPPED", "ERROR", "EXPIRED"):
+            return "glue_lease_unverifiable"
+        return None
+
     def advance(self, now=None):
         now = now or datetime.now(timezone.utc)
         if now.tzinfo is None:
@@ -163,6 +203,12 @@ class RdsController:
                 quiet_from = max(quiet_from, datetime.fromisoformat(activity))
             if now - quiet_from < self.idle:
                 return "idle_grace"
+            # Existing DynamoDB controller lock protects against a concurrent
+            # Glue lease acquisition: the launcher must require this same lock
+            # to be absent/expired when acquiring the processing reservation.
+            blocker = self._glue_lease_blocker(state, now)
+            if blocker:
+                return blocker
             # Automatic stopping is opt-in only after reviewing every RDS client.
             if not self.automatic_stop_enabled:
                 return "automatic_stop_disabled"
@@ -178,7 +224,8 @@ class RdsController:
             refreshed = self._state()
             if (refreshed.get("worker_task_arn")
                     or refreshed.get("last_event_at") != activity
-                    or refreshed.get("error_hold")):
+                    or refreshed.get("error_hold")
+                    or self._glue_lease_blocker(refreshed, now)):
                 return "activity_changed"
             if self._pending():
                 return "pending_detected"
