@@ -1,0 +1,26 @@
+# Phase 6 dbt Core: short-lived ECS task, never an always-on service.
+# Build with the same amd64 buildx / provenance=false pattern as Phase 5.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DBT_SEND_ANONYMOUS_USAGE_STATS=false \
+    DBT_LOG_FORMAT=text
+
+WORKDIR /opt/app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir "dbt-redshift>=1.9,<2" "boto3>=1.35" \
+    && useradd --system --uid 10001 dbtrunner
+
+COPY analytics/dbt/ /opt/app/analytics/dbt/
+COPY scripts/aws/run_phase6_dbt.py /opt/app/scripts/aws/run_phase6_dbt.py
+# profiles.yml is intentionally templated with env_var; credentials are passed
+# only to the running dbt subprocess and never baked into the image.
+RUN cp /opt/app/analytics/dbt/profiles.example.yml /opt/app/analytics/dbt/profiles.yml \
+    && chown -R 10001:10001 /opt/app
+
+USER dbtrunner
+ENTRYPOINT ["python", "/opt/app/scripts/aws/run_phase6_dbt.py"]
+CMD ["--action", "help"]
