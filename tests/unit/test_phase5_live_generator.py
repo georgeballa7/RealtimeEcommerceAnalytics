@@ -18,7 +18,7 @@ def test_deterministic_order_selection():
                 for i in range(10)]
     customers = [f"gid://shopify/Customer/{i}" for i in range(100)]
     a = mod.make_orders(variants, customers, "daily-20261119", 150, 20261118, POLICY)
-    b = mod.make_orders(variants, customers, "daily-20261119", 45, 20261118, POLICY)
+    b = mod.make_orders(variants, customers, "daily-20261119", 150, 20261118, POLICY)
     assert a == b
     assert len(a) == 150 and all(x["lines"] for x in a)
 
