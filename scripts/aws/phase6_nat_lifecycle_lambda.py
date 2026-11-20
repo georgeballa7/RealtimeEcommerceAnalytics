@@ -54,11 +54,14 @@ def can_begin_new_warm(local: datetime, slot: str) -> bool:
 
 def can_consider_release(local: datetime, slot: str) -> bool:
     minute = local.hour * 60 + local.minute
-    # Both generator starts and the separate 18:00 lifecycle task need NAT.
+    # The legacy standalone 18:00 task retains NAT only until a verified
+    # Terraform cutover disables that schedule. Completion/backlog guards
+    # must pass independently before actual NAT deletion.
     if slot == "morning":
         return minute >= 8 * 60 + 30
     if slot == "afternoon":
-        return minute >= 18 * 60 + 25
+        legacy = os.environ.get("PHASE5_LEGACY_LIFECYCLE_ENABLED", "true").lower()
+        return minute >= (18 * 60 + 25 if legacy != "false" else 16 * 60 + 30)
     return True
 
 
