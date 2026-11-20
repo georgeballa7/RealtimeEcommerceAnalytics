@@ -33,32 +33,35 @@ function Invoke-AwsText([string[]]$AwsArgs) {
     return $value
 }
 
-$account = Invoke-AwsText @("sts", "get-caller-identity", "--query", "Account")
+$account = Invoke-AwsText -AwsArgs @("sts", "get-caller-identity", "--query", "Account")
 if ($account -ne $ExpectedAccount) { throw "Unexpected AWS account: $account" }
-$domain = Invoke-AwsText @(
+$domain = Invoke-AwsText -AwsArgs @(
     "lambda", "get-function-configuration", "--function-name", "ecommerce-demo-phase5-fastapi",
     "--query", "Environment.Variables.SHOPIFY_SHOP_DOMAIN"
 )
-$secretArn = Invoke-AwsText @(
+$secretArn = Invoke-AwsText -AwsArgs @(
     "lambda", "get-function-configuration", "--function-name", "ecommerce-demo-phase5-fastapi",
     "--query", "Environment.Variables.SHOPIFY_WEBHOOK_SECRET_ARN"
 )
-$lambdaImage = Invoke-AwsText @(
+$lambdaImage = Invoke-AwsText -AwsArgs @(
     "lambda", "get-function", "--function-name", "ecommerce-demo-phase5-fastapi",
     "--query", "Code.ImageUri"
 )
-$generatorTask = Invoke-AwsText @(
+$generatorTask = Invoke-AwsText -AwsArgs @(
     "scheduler", "get-schedule", "--name", "ecommerce-demo-phase5-morning",
     "--query", "Target.EcsParameters.TaskDefinitionArn"
 )
-$lifecycleTask = Invoke-AwsText @(
+$lifecycleTask = Invoke-AwsText -AwsArgs @(
     "scheduler", "get-schedule", "--name", "ecommerce-demo-phase5-lifecycle",
     "--query", "Target.EcsParameters.TaskDefinitionArn"
 )
-$projectorTask = "ecommerce-phase5-projector-demo:2"
-$generatorImage = Invoke-AwsText @("ecs", "describe-task-definition", "--task-definition", $generatorTask, "--query", "taskDefinition.containerDefinitions[0].image")
-$lifecycleImage = Invoke-AwsText @("ecs", "describe-task-definition", "--task-definition", $lifecycleTask, "--query", "taskDefinition.containerDefinitions[0].image")
-$projectorImage = Invoke-AwsText @("ecs", "describe-task-definition", "--task-definition", $projectorTask, "--query", "taskDefinition.containerDefinitions[0].image")
+$projectorTask = Invoke-AwsText -AwsArgs @(
+    "lambda", "get-function-configuration", "--function-name", "ecommerce-demo-phase5-controller",
+    "--query", "Environment.Variables.PROJECTOR_TASK_DEFINITION"
+)
+$generatorImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "--task-definition", $generatorTask, "--query", "taskDefinition.containerDefinitions[0].image")
+$lifecycleImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "--task-definition", $lifecycleTask, "--query", "taskDefinition.containerDefinitions[0].image")
+$projectorImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "--task-definition", $projectorTask, "--query", "taskDefinition.containerDefinitions[0].image")
 
 # Preserve the existing warehouse and all deployed Phase 5 inputs; otherwise
 # Terraform defaults can plan destruction of operational resources.
@@ -80,7 +83,7 @@ Push-Location $TerraformDir
 try {
     & terraform init -input=false
     if ($LASTEXITCODE -ne 0) { throw "terraform init failed" }
-    & terraform fmt -check
+    & terraform fmt -check phase6_redshift.tf phase6_rds_exporter.tf phase6_glue_silver.tf
     if ($LASTEXITCODE -ne 0) { throw "terraform fmt check failed" }
     & terraform validate
     if ($LASTEXITCODE -ne 0) { throw "terraform validate failed" }
@@ -132,7 +135,7 @@ if (-not $Launch) {
     return
 }
 
-$rdsStatus = Invoke-AwsText @(
+$rdsStatus = Invoke-AwsText -AwsArgs @(
     "rds", "describe-db-instances", "--db-instance-identifier", $DbId,
     "--query", "DBInstances[0].DBInstanceStatus"
 )
@@ -147,11 +150,21 @@ elseif ($rdsStatus -ne "available" -and $rdsStatus -ne "starting") {
 if ($LASTEXITCODE -ne 0) { throw "RDS did not reach available status" }
 
 $batchId = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-$runId = Invoke-AwsText @(
-    "glue", "start-job-run", "--job-name", $JobName,
-    "--arguments", "{`"--batch-id`":`"$batchId`"}",
-    "--query", "JobRunId"
+$runArgsFile = Join-Path ([System.IO.Path]::GetTempPath()) ("phase6-glue-" + $batchId + ".json")
+[System.IO.File]::WriteAllText(
+    $runArgsFile, (@{ "--batch-id" = $batchId } | ConvertTo-Json -Compress),
+    (New-Object System.Text.UTF8Encoding($false))
 )
+try {
+    $runId = Invoke-AwsText -AwsArgs @(
+        "glue", "start-job-run", "--job-name", $JobName,
+        "--arguments", ("file://" + $runArgsFile),
+        "--query", "JobRunId"
+    )
+}
+finally {
+    Remove-Item -LiteralPath $runArgsFile -ErrorAction SilentlyContinue
+}
 Write-Host "Glue started: $JobName / $runId (batch $batchId)"
 for ($poll = 0; $poll -lt 45; $poll++) {
     Start-Sleep -Seconds 30
