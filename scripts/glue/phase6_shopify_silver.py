@@ -125,7 +125,7 @@ def discover_part_files(s3, bucket, prefix):
     for page in pager.paginate(Bucket=bucket, Prefix=prefix.rstrip("/") + "/"):
         for obj in page.get("Contents", []):
             key = obj["Key"]
-            if "/part-" in key and key.endswith(".json.gz"):
+            if "/part-" in key and (key.endswith(".json.gz") or key.endswith(".parquet")):
                 files.append(key)
     return sorted(files)
 
@@ -160,14 +160,20 @@ def main():
                .option("driver", "org.postgresql.Driver").load())
         raw.persist()
         source_rows = raw.count()
-        write_partitioned(raw, f"s3://{args.bucket}/{prefix}/bronze/{table}")
-        clean = add_reasons(to_contract(raw, table), table)
+        bronze_uri = f"s3://{args.bucket}/{prefix}/bronze/{table}"
+        # Parquet preserves JDBC Decimal and timestamp types; downstream reads
+        # never requery RDS after the immutable Bronze write completes.
+        raw.write.mode("errorifexists").parquet(bronze_uri)
+        raw.unpersist()
+        bronze = spark.read.parquet(bronze_uri)
+        if bronze.count() != source_rows:
+            raise ValueError(f"Bronze record count mismatch for {table}")
+        clean = add_reasons(to_contract(bronze, table), table)
         rejected = clean.where(F.size("dq_reasons") > 0)
         passed = clean.where(F.size("dq_reasons") == 0).drop("dq_reasons")
         ensure_unique(passed, TABLE_KEYS[table], table)
         valid[table], rejects[table] = passed, rejected
         counts[table] = {"source": source_rows}
-        raw.unpersist()
 
     # Require parent/child integrity before publishing trusted Silver tables.
     checks = [
