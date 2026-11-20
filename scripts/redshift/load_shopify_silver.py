@@ -13,6 +13,8 @@ import json
 import os
 import re
 import time
+from uuid import uuid4
+from botocore.exceptions import ClientError
 from dataclasses import dataclass
 
 import boto3
@@ -306,18 +308,43 @@ def lambda_handler(event, context):
     database = os.environ.get("REDSHIFT_DATABASE", "analytics")
     s3 = boto3.client("s3")
     data = boto3.client("redshift-data")
-    keys = discover_manifests(s3, bucket=bucket)
-    if not keys:
-        raise RuntimeError("No completed Glue Silver manifests")
-    dry_run = bool(event.get("dry_run", False))
-    result = process_published_snapshots(
-        s3=s3, data=data, bucket=bucket, role_arn=role_arn,
-        workgroup=workgroup, database=database, manifest_keys=keys, apply=not dry_run,
+    # The Glue success event and coordinator reconciliation may both invoke
+    # this function. Serialize them using the EXISTING DynamoDB table.
+    owner = str(uuid4())
+    table = boto3.resource("dynamodb").Table(
+        os.environ.get("CONTROLLER_TABLE", "ecommerce-demo-phase5-controller")
     )
-    print(json.dumps({"status": "WAREHOUSE_PREVIEW" if dry_run else "WAREHOUSE_CATCHUP",
-                      "outcomes": result}, sort_keys=True))
-    return {"loaded": sum(x["status"] == "LOADED" for x in result),
-            "dry_run": dry_run, "outcomes": result}
+    try:
+        table.put_item(
+            Item={"id": "phase6-redshift-loader", "owner": owner,
+                  "expires_at": int(time.time()) + 930},
+            ConditionExpression="attribute_not_exists(id) OR expires_at < :now",
+            ExpressionAttributeValues={":now": int(time.time())},
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            print(json.dumps({"status": "LOADER_BUSY", "reason": "another_invocation_owns_lease"}))
+            return {"status": "BUSY"}
+        raise
+    try:
+        keys = discover_manifests(s3, bucket=bucket)
+        if not keys:
+            raise RuntimeError("No completed Glue Silver manifests")
+        dry_run = bool(event.get("dry_run", False))
+        result = process_published_snapshots(
+            s3=s3, data=data, bucket=bucket, role_arn=role_arn,
+            workgroup=workgroup, database=database, manifest_keys=keys, apply=not dry_run,
+        )
+        print(json.dumps({"status": "WAREHOUSE_PREVIEW" if dry_run else "WAREHOUSE_CATCHUP",
+                          "outcomes": result}, sort_keys=True))
+        return {"loaded": sum(x["status"] == "LOADED" for x in result),
+                "dry_run": dry_run, "outcomes": result}
+    finally:
+        table.delete_item(
+            Key={"id": "phase6-redshift-loader"},
+            ConditionExpression="owner=:owner",
+            ExpressionAttributeValues={":owner": owner},
+        )
 
 
 def main():
