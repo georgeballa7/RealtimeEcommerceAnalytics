@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ecommerce.application.use_cases.shopify_order_lifecycle import (
-    ORDER_QUERY, Operation, advance, cancellation_plan,
+    ORDER_QUERY, Operation, advance, cancellation_plan, synthetic_refund_plan,
 )
 from ecommerce.infrastructure.aws.lifecycle_journal import S3LifecycleJournal
 from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyClientCredentials, ShopifyGraphQLClient
@@ -67,6 +67,46 @@ def eligible_cancellations(gql, records, *, now, policy):
             yield Operation(run_id, order_id, "cancel", plan["due_at"])
 
 
+
+def eligible_synthetic_refunds(gql, records, *, now, policy):
+    """One stable, nonfinancial refund candidate per verified synthetic order.
+
+    Skip candidates selected for cancellation. No real-payment refund may enter
+    the scheduled workflow. Explicit operational refunds remain separate.
+    """
+    for run_id, order_id in records:
+        order = gql.query(ORDER_QUERY, {"id": order_id}).get("order")
+        if not order or order.get("id") != order_id:
+            raise RuntimeError("Synthetic source order missing in Shopify")
+        created = datetime.fromisoformat(order["createdAt"].replace("Z", "+00:00"))
+        cancelled = cancellation_plan(
+            run_id, order_id, created, seed=policy["seed"],
+            probability_percent=policy["cancellation_probability_percent"],
+            max_delay_days=policy["cancellation_delay_max_days"])
+        if cancelled["selected"] or order.get("cancelledAt"):
+            continue
+        plan = synthetic_refund_plan(
+            run_id, order_id, created, seed=policy["seed"],
+            probability_percent=policy.get("synthetic_refund_probability_percent", 5),
+            max_delay_days=policy.get("synthetic_refund_delay_max_days", 2))
+        if not plan["selected"] or datetime.fromisoformat(plan["due_at"]) > now:
+            continue
+        # Transactionless only. No successful, pending or unknown gateway funds.
+        if order.get("transactions") != [] or order.get("displayFinancialStatus") not in {"PENDING", "VOIDED"}:
+            continue
+        lines = order.get("lineItems") or {}
+        if (lines.get("pageInfo") or {}).get("hasNextPage"):
+            raise RuntimeError("Refund candidate has uninspected Shopify lines")
+        candidates = sorted(
+            (line["id"] for line in lines.get("nodes", [])
+             if isinstance(line.get("id"), str)
+             and isinstance(line.get("refundableQuantity"), int)
+             and line["refundableQuantity"] >= 1))
+        if candidates:
+            yield Operation(run_id, order_id, "refund", plan["due_at"],
+                            candidates[0], 1, synthetic_nonfinancial=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run-id", action="append",
@@ -112,7 +152,9 @@ def main():
         else:
             ids = args.run_id or recent_generation_run_ids(s3, bucket, now)
             gen_records = completed_generation_records(s3, bucket, run_ids=ids)
-            operations = eligible_cancellations(gql, gen_records, now=now, policy=policy)
+            generation = list(gen_records)
+            operations = list(eligible_cancellations(gql, generation, now=now, policy=policy))
+            operations.extend(eligible_synthetic_refunds(gql, generation, now=now, policy=policy))
         stats = {"mode": "APPLY" if args.apply else "PREVIEW", "seen": 0, "outcomes": {}}
         for o in operations:
             if stats["seen"] >= args.limit: break
