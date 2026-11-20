@@ -68,7 +68,7 @@ def eligible_cancellations(gql, records, *, now, policy):
 
 
 
-def eligible_synthetic_refunds(gql, records, *, now, policy):
+def eligible_synthetic_refunds(gql, records, *, now, policy, refund_policy):
     """One stable, nonfinancial refund candidate per verified synthetic order.
 
     Skip candidates selected for cancellation. No real-payment refund may enter
@@ -87,8 +87,8 @@ def eligible_synthetic_refunds(gql, records, *, now, policy):
             continue
         plan = synthetic_refund_plan(
             run_id, order_id, created, seed=policy["seed"],
-            probability_percent=policy.get("synthetic_refund_probability_percent", 5),
-            max_delay_days=policy.get("synthetic_refund_delay_max_days", 2))
+            probability_percent=refund_policy["probability_percent"],
+            max_delay_days=refund_policy["max_delay_days"])
         if not plan["selected"] or datetime.fromisoformat(plan["due_at"]) > now:
             continue
         # Transactionless only. No successful, pending or unknown gateway funds.
@@ -137,6 +137,14 @@ def main():
     bucket = os.environ["S3_LANDING_BUCKET"]
     policy_path = Path(__file__).resolve().parents[1] / "config/phase4-simulation-policy.json"
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    refund_policy = json.loads((policy_path.parent / "phase5-synthetic-refund-policy.json").read_text(encoding="utf-8"))
+    if (refund_policy["version"] != "phase5-synthetic-refund-policy-v1"
+            or refund_policy["mode"] != "transactionless_shopify_refund_only"
+            or refund_policy["currency"] != "GBP"
+            or refund_policy["payment_transactions_allowed"] is not False
+            or refund_policy["refund_quantity_per_order"] != 1
+            or refund_policy["restock_type"] != "NO_RESTOCK"):
+        raise RuntimeError("Unreviewed or unsafe automatic synthetic refund policy")
     now = datetime.now(timezone.utc)
     provider = ShopifyClientCredentials(os.environ["SHOPIFY_SHOP_DOMAIN"],
                                         os.environ["SHOPIFY_CLIENT_ID"], os.environ["SHOPIFY_CLIENT_SECRET"])
@@ -154,7 +162,13 @@ def main():
             gen_records = completed_generation_records(s3, bucket, run_ids=ids)
             generation = list(gen_records)
             operations = list(eligible_cancellations(gql, generation, now=now, policy=policy))
-            operations.extend(eligible_synthetic_refunds(gql, generation, now=now, policy=policy))
+            operations.extend(eligible_synthetic_refunds(
+                gql, generation, now=now, policy=policy, refund_policy=refund_policy))
+            # A backlog of previously completed operations must not starve new
+            # refunds/cancellations under the existing per-run limit.
+            operations = [op for op in operations
+                          if (journal.get(op.key) or {}).get("state") != "complete"]
+            operations.sort(key=lambda op: (op.requested_at, op.key))
         stats = {"mode": "APPLY" if args.apply else "PREVIEW", "seen": 0, "outcomes": {}}
         for o in operations:
             if stats["seen"] >= args.limit: break
