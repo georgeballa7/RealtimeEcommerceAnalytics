@@ -1,7 +1,7 @@
 version: 2
 sources:
-  - name: raw
-    schema: raw
+  - name: landing
+    schema: landing
     quoting:
       schema: true
     tables:
@@ -23,7 +23,7 @@ sources:
             data_tests:
               - not_null
               - relationships:
-                  to: source('raw', 'synthetic_orders')
+                  to: source('landing', 'synthetic_orders')
                   field: order_id
       - name: synthetic_cancellations
         columns:
@@ -33,7 +33,7 @@ sources:
             data_tests:
               - not_null
               - relationships:
-                  to: source('raw', 'synthetic_orders')
+                  to: source('landing', 'synthetic_orders')
                   field: order_id
       - name: shopify_live_order
         columns:
