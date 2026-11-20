@@ -88,13 +88,16 @@ def test_shopify_draft_order_create_does_not_query_nonexistent_usererror_code():
     assert 'userErrors { code' not in create
 
 
-def test_phase6_combined_release_reuses_unmodified_projector_and_lifecycle():
+def test_phase6_release_builds_refund_lifecycle_and_reuses_projector():
     script = (ROOT / "scripts/aws/deploy_phase6_rds_controller.ps1").read_text()
     assert "Dockerfile.phase5-lambda" in script
     assert "Dockerfile.phase5-generator" in script
     assert "phase5_projector_image = $projectorImage" in script
-    assert "phase5_lifecycle_image = $lifecycleImage" in script
+    assert "phase5_lifecycle_image = $newLifecycleImage" in script
+    assert "Dockerfile.phase5-lifecycle" in script
+    assert "enable_phase5_legacy_lifecycle_schedule = $true" in script
     assert "phase5_generator_image = $newGeneratorImage" in script
+    assert "cron(0 22 * * ? *)" in script
     assert "enable_phase6_glue_rds_lease = $true" in script
     assert "validate_phase6_release_plan.py" not in script
     assert "terraform show $planPath" in script
