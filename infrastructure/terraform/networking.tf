@@ -1,3 +1,21 @@
+# Static is the current deployed behavior. Switch to on_demand only after
+# reviewing the NAT/route removals during the quiet window. Runtime NATs and
+# 0.0.0.0/0 application routes are then managed by the scheduled Lambda,
+# NOT by Terraform, to keep Terraform state consistent across daily cycles.
+variable "nat_gateway_mode" {
+  type        = string
+  default     = "static"
+  description = "static = Terraform-managed NAT (existing); on_demand = Lambda creates/deletes NAT and app default routes when needed."
+  validation {
+    condition     = contains(["static", "on_demand"], var.nat_gateway_mode)
+    error_message = "nat_gateway_mode must be static or on_demand."
+  }
+}
+
+locals {
+  static_nat_count = var.nat_gateway_mode == "static" ? var.nat_gateway_count : 0
+}
+
 data "aws_availability_zones" "available" { state = "available" }
 
 resource "aws_vpc" "ecommerce" {
@@ -55,7 +73,7 @@ resource "aws_eip" "nat" {
   tags = { Name = "ecommerce-nat-ip-${count.index + 1}" }
 }
 resource "aws_nat_gateway" "ecommerce" {
-  count = var.nat_gateway_count
+  count = local.static_nat_count
   allocation_id = aws_eip.nat[count.index].id
   subnet_id = aws_subnet.public[count.index].id
   depends_on = [aws_route.public]
@@ -67,7 +85,7 @@ resource "aws_route_table" "application" {
   tags = { Name = "ecommerce-app-rt-${count.index + 1}" }
 }
 resource "aws_route" "application" {
-  count = 2
+  count = var.nat_gateway_mode == "static" ? 2 : 0
   route_table_id = aws_route_table.application[count.index].id
   destination_cidr_block = "0.0.0.0/0"
   # With one NAT, both app subnets share NAT 1; with two, each AZ uses its own.
