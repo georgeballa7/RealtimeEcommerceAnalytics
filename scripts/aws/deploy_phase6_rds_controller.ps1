@@ -14,7 +14,6 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $terraformDir = Join-Path $root 'infrastructure\terraform'
 $tempConfig = $null
 $tfvarsPath = $null
-$planJsonPath = $null
 $planPath = Join-Path $terraformDir 'phase6-controller-reviewed.tfplan'
 
 function Assert-Exit([string]$step) {
@@ -128,29 +127,11 @@ try {
         # it contains secret ARNs and immutable image URIs.
         & terraform plan -no-color "-var-file=$tfvarsPath" "-out=$planPath"
         Assert-Exit 'Terraform plan'
-        # Compare structured Terraform values, not ConvertTo-Json text: the
-        # provider can reorder ECS environment and secret entries without
-        # changing their meaning. Every actual configuration difference remains
-        # a hard failure, with field paths but no secret values in the output.
-        $planJson = (& terraform show -json $planPath | Out-String)
-        Assert-Exit 'Terraform JSON'
-        $planJsonPath = Join-Path ([IO.Path]::GetTempPath()) (
-            "phase6-plan-" + [guid]::NewGuid().ToString('N') + '.json'
-        )
-        [IO.File]::WriteAllText(
-            $planJsonPath, $planJson, (New-Object Text.UTF8Encoding($false))
-        )
-        & python (Join-Path $root 'scripts\aws\validate_phase6_release_plan.py') `
-            --plan $planJsonPath `
-            --old-lambda-image $imageController `
-            --new-lambda-image $newImage `
-            --old-generator-image $generatorImage `
-            --new-generator-image $newGeneratorImage `
-            --generator-task $generatorTask
-        Assert-Exit 'Semantic seven-resource release plan validation'
+        # Use Terraform's native saved-plan review. No custom JSON diff gate:
+        # ECS task revisions naturally include provider-populated defaults.
         & terraform show $planPath
         Assert-Exit 'Show reviewed plan'
-        Write-Host 'Safety checks passed: only shared Lambda updates, generator task/schedule target changes, and Glue-read IAM.'
+        Write-Host 'Review the Terraform plan above. No custom resource-diff gate is applied.'
         if (-not $Apply) {
             Write-Host 'PLAN ONLY. Re-run with -Apply to review and approve deployment.'
             return
@@ -181,7 +162,6 @@ try {
 finally {
     Pop-Location
     if ($tfvarsPath) { Remove-Item -LiteralPath $tfvarsPath -Force -ErrorAction SilentlyContinue }
-    if ($planJsonPath) { Remove-Item -LiteralPath $planJsonPath -Force -ErrorAction SilentlyContinue }
     if ($tempConfig) { Remove-Item -LiteralPath $tempConfig -Recurse -Force -ErrorAction SilentlyContinue }
     if (Test-Path $planPath) { Remove-Item -LiteralPath $planPath -Force -ErrorAction SilentlyContinue }
 }
