@@ -56,3 +56,57 @@ def test_production_slot_counts_are_bounded_and_distinct():
     assert morning[morning.index('--run-id') + 1] != afternoon[afternoon.index('--run-id') + 1]
     assert morning[-2:] == ['--confirm-run-id', 'live-20261120-morning']
     assert afternoon[-2:] == ['--confirm-run-id', 'live-20261120-afternoon']
+
+
+def test_combined_slot_never_marks_ready_when_generation_or_lifecycle_fails(monkeypatch):
+    from scripts import phase5_slot_runner as runner
+    now = datetime(2026, 11, 20, 7, 0, tzinfo=timezone.utc)
+    calls = []
+    def fail_generator(cmd):
+        calls.append(cmd)
+        return 1
+    monkeypatch.setattr(runner.subprocess, "call", fail_generator)
+    marker = []
+    monkeypatch.setattr(runner, "publish_completed_slot", lambda *args: marker.append(args))
+    assert runner.run_combined_slot("morning", now, apply=True) == 1
+    assert len(calls) == 1 and not marker
+
+    calls.clear()
+    def fail_lifecycle(cmd):
+        calls.append(cmd)
+        return 0 if len(calls) == 1 else 75
+    monkeypatch.setattr(runner.subprocess, "call", fail_lifecycle)
+    assert runner.run_combined_slot("morning", now, apply=True) == 75
+    assert len(calls) == 2 and "--require-settled" in calls[1]
+    assert not marker
+
+
+def test_combined_slot_publishes_marker_only_after_both_successes(monkeypatch):
+    from scripts import phase5_slot_runner as runner
+    now = datetime(2026, 11, 20, 7, 0, tzinfo=timezone.utc)
+    monkeypatch.setenv("S3_LANDING_BUCKET", "test-landing")
+    commands = []
+    def success(cmd):
+        commands.append(cmd)
+        return 0
+    monkeypatch.setattr(runner.subprocess, "call", success)
+    committed = []
+    monkeypatch.setattr(runner, "publish_completed_slot", lambda *args: committed.append(args))
+    assert runner.run_combined_slot("morning", now, apply=True) == 0
+    assert len(commands) == 2
+    assert commands[1][-2:] == ["--limit", "500"]
+    assert "--require-settled" in commands[1]
+    assert committed == [("test-landing", "live-20261120-morning", "morning")]
+
+
+def test_preview_and_smoke_never_publish_daily_readiness(monkeypatch):
+    from scripts import phase5_slot_runner as runner
+    now = datetime(2026, 11, 20, 7, tzinfo=timezone.utc)
+    commands = []
+    monkeypatch.setattr(runner.subprocess, "call", lambda cmd: commands.append(cmd) or 0)
+    monkeypatch.setattr(runner, "publish_completed_slot",
+                        lambda *args: (_ for _ in ()).throw(AssertionError("not allowed")))
+    assert runner.run_combined_slot("morning", now, apply=False) == 0
+    assert runner.run_combined_slot("morning", now, apply=True,
+                                    smoke_run_id="smoke-abc123-20261120") == 0
+    assert len(commands) == 2
