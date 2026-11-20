@@ -7,7 +7,7 @@ routes, RDS, Shopify schedules, or Terraform state.
 
 Invoked every five minutes via EventBridge Scheduler. Creates NAT in advance
 of the 08:00 and 16:00 Berlin generator windows. Releases NAT only after
-dependent workloads settle, including the 18:00 lifecycle ECS run.
+dependent workloads settle, including the 22:00 lifecycle ECS run.
 """
 from __future__ import annotations
 
@@ -60,8 +60,9 @@ def can_consider_release(local: datetime, slot: str) -> bool:
     if slot == "morning":
         return minute >= 8 * 60 + 30
     if slot == "afternoon":
-        legacy = os.environ.get("PHASE5_LEGACY_LIFECYCLE_ENABLED", "true").lower()
-        return minute >= (18 * 60 + 25 if legacy != "false" else 16 * 60 + 30)
+        # 22:00 lifecycle and its webhooks must finish before NAT release.
+        # Past midnight still belongs to the preceding afternoon processing cycle.
+        return minute < 3 * 60 or minute >= 22 * 60 + 25
     return True
 
 
@@ -70,7 +71,7 @@ def is_stale(local: datetime, slot: str) -> bool:
     if slot == "morning":
         return minute >= 14 * 60
     if slot == "afternoon":
-        return minute >= 23 * 60
+        return 3 * 60 <= minute < 7 * 60 + 30
     return True
 
 
