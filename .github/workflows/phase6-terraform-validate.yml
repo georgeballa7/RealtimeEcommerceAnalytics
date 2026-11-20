@@ -28,7 +28,7 @@ jobs:
         with:
           terraform_version: "1.14.0"
       - name: Check Phase 6 formatting without changing files
-        run: terraform fmt -check -diff phase6_redshift.tf phase6_rds_exporter.tf
+        run: terraform fmt -check -diff phase6_redshift.tf phase6_rds_exporter.tf phase6_glue_silver.tf
       - name: Initialize providers without remote state or AWS credentials
         run: terraform init -backend=false -input=false -no-color
       - name: Validate full Terraform configuration without applying
