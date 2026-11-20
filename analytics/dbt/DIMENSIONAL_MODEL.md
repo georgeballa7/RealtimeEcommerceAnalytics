@@ -9,16 +9,14 @@ Its templating is Jinja. `source()` declares Silver Redshift dependencies,
 Models are SQL SELECTs materialized as views or tables.
 
 This model consumes **only Glue-validated S3 Silver already loaded to Redshift**
-(not RDS operational tables or raw S3 objects). The manual Glue run is a separate
-prerequisite and has not been validated by this dbt implementation.
+(not RDS operational tables or raw S3 objects). The 20 November 2026 Glue-to-Redshift export was independently reconciled. The dbt model itself is still only parsed offline; runtime materialization and all data tests remain pending.
 
 ## Redshift schema layout
 
 - `silver_staging`: **physical source tables** copied from validated S3 Silver,
   including `synthetic_orders`, `synthetic_order_items`,
   `synthetic_cancellations`, the five Shopify operational projection tables,
-  and `warehouse_load_ledger`. Historical schema is still physically called
-  `raw` until the separately controlled in-place rename is applied.
+  and `warehouse_load_ledger`. The physical `raw` → `silver_staging` rename completed on 20 November 2026.
 - `analytics_staging`: dbt **views** `stg_synthetic_orders`,
   `stg_shopify_orders` (with profile schema `analytics` and default dbt schema
   naming from dbt_project.yml's `+schema: staging`).
@@ -27,17 +25,16 @@ prerequisite and has not been validated by this dbt implementation.
   With the current `profiles.example.yml`, dbt's default schema generator
   prefixes custom schemas with `analytics_`.
 
-## Three dimensions
+## Three conformed dimensions
 
 | Dimension | Grain | Logical PK | Main attributes |
 | --- | --- | --- | --- |
-| dim_customers | one verified canonical customer | `customer_key` | first_seen_at, last_seen_at, total_orders, lifetime_order_value_gbp |
+| dim_customers | one verified canonical customer | `customer_key` | first_order_at, latest_order_at |
 | dim_products | one source-qualified product variant | `variant_key` | product_key (nullable until mapped), sku, source_system |
 | dim_date | one calendar date, 2026–2040 | `date_key` | year_number, quarter_number, month_number, weekday_number |
 
-For the initial implementation, `dim_customers` is inferred from observed
-orders (not all 5,942 historical customers without an order in the 2026 period).
-`dim_products` includes historical and live observed variants but does **not**
+For the current implementation, `dim_customers` includes all 5,942 verified customer identities from Silver plus any canonical historical order identities; sales timestamps are descriptive only and order measures remain in the facts.
+`dim_products` derives historical and live variant keys directly from Silver source lines but does **not**
 yet assert a cross-source product match. The RDS `shopify_product_identity`
 and `shopify_variant_identity` ledgers hold verified crosswalks. They must be
 added to Glue Silver and Redshift before mapping Shopify's `product_key` to
@@ -119,9 +116,8 @@ transactional Redshift COPY/upsert to `silver_staging` ->
 `dbt build` -> Power BI refresh / churn feature extraction ->
 MLflow scoring and model-version tracking.
 
-Do not run dbt while the original `raw` Redshift schema has not yet been
-renamed or while the validated Shopify Redshift loader is not implemented.
-Current dbt runtime requires a network-accessible private Redshift workgroup
+The source schema has been renamed and the validated Shopify Silver loader successfully loaded both 20 November snapshots. Before any dbt materialization, prepare the separate `analytics_staging` and `analytics_marts` namespaces for the dbt runtime identity and verify its SELECT access to Silver. These are not yet verified as deployed.
+The pending dbt runtime requires a network-accessible private Redshift workgroup
 and short-lived credentials; the example profiles.yml documents required
 connection fields, not a deployed execution environment.
 
@@ -133,6 +129,10 @@ variant to historical canonical variant and product IDs. Then strengthen churn
 with point-in-time snapshots, segmentation by source/synthetic status,
 refund/return-frequency features and probabilistic MLflow predictions. Never
 mix simulated cancellations with actual cash refunds.
+
+## Reviewed star schema ERD
+
+See [STAR_SCHEMA_ERD.md](STAR_SCHEMA_ERD.md) for the rendered Mermaid entity-relationship diagram, source lineage, seven-table core fact/dimension grains, and the target namespaces. Run `analytics/redshift/prepare_dbt_warehouse_schemas.sql` only with the verified dbt execution role; this step is not yet applied.
 
 ## Power BI model relationships
 
