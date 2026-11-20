@@ -1,5 +1,4 @@
 """Real Glue Silver manifest catch-up, full-snapshot and idempotency tests."""
-import copy
 import gzip
 import io
 import json
