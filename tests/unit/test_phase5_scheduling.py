@@ -44,3 +44,15 @@ def test_production_slot_requires_schema_and_webhook_readiness(monkeypatch):
     with pytest.raises(RuntimeError): assert_deployment_ready()
     table.get_item.return_value={"Item":{"schema_ready":True,"webhooks_ready":True}}
     assert_deployment_ready()
+
+
+def test_production_slot_counts_are_bounded_and_distinct():
+    from scripts.phase5_slot_runner import build_command
+    now = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+    morning = build_command('morning', now, apply=True)
+    afternoon = build_command('afternoon', now, apply=True)
+    assert morning[morning.index('--count') + 1] == '100'
+    assert afternoon[afternoon.index('--count') + 1] == '150'
+    assert morning[morning.index('--run-id') + 1] != afternoon[afternoon.index('--run-id') + 1]
+    assert morning[-2:] == ['--confirm-run-id', 'live-20261120-morning']
+    assert afternoon[-2:] == ['--confirm-run-id', 'live-20261120-afternoon']
