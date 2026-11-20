@@ -99,7 +99,9 @@ def test_phase6_combined_release_reuses_unmodified_projector_and_lifecycle():
     assert "aws_ecs_task_definition.phase5_generator[0]" in script
     assert 'aws_scheduler_schedule.phase5_generation[\"morning\"]' in script
     assert 'aws_scheduler_schedule.phase5_generation[\"afternoon\"]' in script
-    assert "if ($changes.Count -ne 7)" in script
+    assert "validate_phase6_release_plan.py" in script
+    assert "Semantic seven-resource release plan validation" in script
+    assert "if ($changes.Count -ne 7)" not in script
     assert "if (-not $Apply)" in script
     assert "DEPLOY-GLUE-LEASE" in script
 
