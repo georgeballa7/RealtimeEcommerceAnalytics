@@ -13,6 +13,8 @@ $global:MockRdsState = 'stopping'
 $global:MockRdsWaitedForStop = $false
 $global:MockRdsStarted = $false
 $global:MockGlueStarted = $false
+$global:MockUseLease = $false
+$global:MockLeaseActions = @()
 
 function global:aws {
     $global:LASTEXITCODE = 0
@@ -61,6 +63,9 @@ function global:aws {
     }
     switch ($query) {
         'Account' { return '825414820081' }
+        'Environment.Variables.PHASE6_GLUE_JOB_NAME' {
+            return 'ecommerce-phase6-shopify-silver-demo'
+        }
         'Environment.Variables.SHOPIFY_SHOP_DOMAIN' {
             return 'realtime-ecommerce-analytics.myshopify.com'
         }
@@ -111,6 +116,9 @@ function global:terraform {
                 $settings.enable_redshift_warehouse -ne $true -or
                 $settings.phase5_generator_image -notlike 'mock-image:*') {
                 throw 'Terraform var-file lost critical existing Phase 5 configuration'
+            }
+            if ($global:MockUseLease -and $settings.enable_phase6_glue_rds_lease -ne $true) {
+                throw 'Protected launch failed to retain lease Terraform flag'
             }
             $global:ObservedPlan = $true
             return 'mock plan completed'
@@ -179,3 +187,35 @@ if ($global:MockApplyCalls -ne 2) {
     throw 'Unexpected number of guarded Terraform apply calls'
 }
 Write-Host 'Verified: stopping -> stopped -> starting -> available -> Glue run -> Silver manifest.'
+
+# Protected launch after the upgraded controller has been deployed.
+# Mock Python lease operations; no Python CLI process or AWS mutation occurs.
+function global:python {
+    $global:LASTEXITCODE = 0
+    $argv = @($args)
+    if ($argv[0] -notlike '*phase6_glue_rds_lease.py') {
+        throw ('Unexpected Python call ' + ($argv -join ' '))
+    }
+    $global:MockLeaseActions += $argv[1]
+    switch ($argv[1]) {
+        'reserve' { return '{"owner":"mock-lease-owner","expiry_unix":1800000000}' }
+        'attach' { return '{"attached_run_id":"jr_mock_123"}' }
+        'renew' { return '{"expiry_unix":1800000000}' }
+        'release' { return '{"released":true}' }
+        default { throw 'Unexpected lease action' }
+    }
+}
+$global:MockUseLease = $true
+$global:MockLaunch = $true
+$global:MockRdsState = 'stopping'
+$global:MockRdsStarted = $false
+$global:MockRdsWaitedForStop = $false
+$global:MockGlueStarted = $false
+& $entry -Launch -UseGlueLease
+if (@($global:MockLeaseActions) -join ',' -ne 'reserve,attach,renew,release') {
+    throw ('Protected Glue lease lifecycle incorrect: ' + ($global:MockLeaseActions -join ','))
+}
+if (-not $global:MockRdsStarted -or -not $global:MockGlueStarted) {
+    throw 'Protected Glue execution failed to coordinate RDS and Glue startup'
+}
+Write-Host 'Verified: lease reserve -> RDS start -> Glue attach -> renew -> terminal release.'
