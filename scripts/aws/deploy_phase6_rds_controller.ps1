@@ -98,7 +98,10 @@ try {
     if ($newImage -isnot [string] -or $newGeneratorImage -isnot [string]) {
         throw 'Image helper returned non-scalar output; aborting before Terraform'
     }
-    if ($newImage -notmatch '@sha256:[a-f0-9]{64}
+    if ($newImage -notmatch '@sha256:[a-f0-9]{64}$' -or $newGeneratorImage -notmatch '@sha256:[a-f0-9]{64}$') {
+        throw 'Image helper returned an invalid immutable image URI'
+    }
+    Write-Host "Verified shared Lambda image: $newImage"
     Write-Host "Verified generator image: $newGeneratorImage"
     Write-Host 'Existing projector and lifecycle images will be reused.'
 
