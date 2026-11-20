@@ -37,6 +37,15 @@ resource "aws_iam_role_policy" "phase5_generator_s3" {
       Action = ["s3:GetObject", "s3:PutObject"]
       Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/live/v1/*"
     }, {
+      # Combined 08:00/16:00 task reads and updates idempotent lifecycle
+      # records and publishes its successful completion marker LAST.
+      Effect = "Allow"
+      Action = ["s3:GetObject", "s3:PutObject"]
+      Resource = [
+        "${aws_s3_bucket.landing.arn}/simulation/phase5/lifecycle/v1/*",
+        "${aws_s3_bucket.landing.arn}/simulation/phase5/slots/v1/*"
+      ]
+    }, {
       # S3 returns 403 instead of NoSuchKey/404 for a missing journal object
       # unless the caller also has bucket-level ListBucket permission.
       # Required by S3OperationJournal.read() on the first generation run.
