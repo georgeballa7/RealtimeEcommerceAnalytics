@@ -11,5 +11,5 @@ select
     true as is_synthetic,
     currency,
     batch_id
-from {{ source('raw', 'synthetic_orders') }}
+from {{ source('silver_staging', 'synthetic_orders') }}
 where synthetic = true and currency = 'GBP'
