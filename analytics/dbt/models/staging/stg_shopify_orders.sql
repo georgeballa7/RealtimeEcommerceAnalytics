@@ -11,8 +11,8 @@ select
     o.synthetic as is_synthetic,
     o.currency,
     cast(null as varchar(100)) as batch_id
-from {{ source('raw', 'shopify_live_order') }} o
-left join {{ source('raw','shopify_customer_identity') }} i
+from {{ source('landing', 'shopify_live_order') }} o
+left join {{ source('landing','shopify_customer_identity') }} i
   on o.shopify_customer_gid = i.shopify_customer_gid
  and i.status = 'verified'
 where o.currency = 'GBP'
