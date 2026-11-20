@@ -187,6 +187,29 @@ def main():
         valid[table], rejects[table] = passed, rejected
         counts[table] = {"source": source_rows}
 
+    # Historical Silver included only customer-linked records. Do the same
+    # for live orders: only a verified Shopify -> canonical customer mapping
+    # is eligible for trusted analytics; missing/guest/unverified stay visible
+    # in quarantine without inventing a new customer.
+    verified_ids = (
+        valid["shopify_customer_identity"]
+        .where(F.col("status") == "verified")
+        .select("shopify_customer_gid")
+        .where(F.col("shopify_customer_gid").isNotNull())
+        .dropDuplicates()
+    )
+    orders_before_identity = valid["shopify_live_order"]
+    trusted_orders = orders_before_identity.join(
+        verified_ids, on="shopify_customer_gid", how="left_semi"
+    )
+    unmatched_orders = orders_before_identity.join(
+        verified_ids, on="shopify_customer_gid", how="left_anti"
+    ).withColumn("dq_reasons", F.array(F.lit("unverified_or_missing_customer_identity")))
+    valid["shopify_live_order"] = trusted_orders
+    rejects["shopify_live_order"] = rejects["shopify_live_order"].unionByName(
+        unmatched_orders, allowMissingColumns=True
+    )
+
     # Require parent/child integrity before publishing trusted Silver tables.
     checks = [
         ("shopify_live_order_line", "shopify_live_order", ["shop_domain", "shopify_order_id"], "orphan_order_line"),
