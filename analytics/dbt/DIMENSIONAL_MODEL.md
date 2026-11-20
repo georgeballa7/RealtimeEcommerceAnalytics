@@ -49,8 +49,8 @@ the canonical historical product UUID. Never infer equivalence from SKU alone.
 | --- | --- | --- | --- | --- |
 | fct_orders | one source-qualified order / `order_key` | `customer_key → dim_customers`; `order_date_key → dim_date` | none | gross_gbp, current_gbp |
 | fct_order_lines | one source-qualified order line / `line_key` | `variant_key → dim_products`; `customer_key → dim_customers`; `order_date_key → dim_date` | `order_key → fct_orders` | quantity, unit_price_gbp, gross_line_gbp |
-| fct_cancellations | one simulated cancellation / `cancellation_key` | `cancellation_date_key → dim_date` | `order_key → fct_orders`; `line_key → fct_order_lines` | cancelled_quantity, cancelled_merchandise_gbp |
-| fct_refund_lines | one recorded Shopify refund line / `refund_line_key` | `refund_date_key → dim_date` | `order_key → fct_orders` | refund_quantity, recorded_refund_line_subtotal_gbp |
+| fct_cancellations | one simulated cancellation / `cancellation_key` | `customer_key → dim_customers`; `variant_key → dim_products`; `cancellation_date_key → dim_date` | `order_key → fct_orders`; `line_key → fct_order_lines` | cancelled_quantity, cancelled_merchandise_gbp |
+| fct_refund_lines | one recorded Shopify refund line / `refund_line_key` | `customer_key → dim_customers`; optional `variant_key → dim_products`; `refund_date_key → dim_date` | `order_key → fct_orders` | refund_quantity, recorded_refund_line_subtotal_gbp |
 
 Redshift PK/FK declarations are informational, not reliably enforced.
 The source RDS enforces PK/FK in OLTP; **dbt data tests** enforce logical
@@ -133,3 +133,13 @@ variant to historical canonical variant and product IDs. Then strengthen churn
 with point-in-time snapshots, segmentation by source/synthetic status,
 refund/return-frequency features and probabilistic MLflow predictions. Never
 mix simulated cancellations with actual cash refunds.
+
+## Power BI model relationships
+
+Use single-direction filters from `dim_date`, `dim_customers`, and
+`dim_products` to the relevant fact tables. Avoid activating direct
+fact-to-fact Power BI relationships simultaneously with all dimension paths:
+those can introduce ambiguous filter propagation and double-counted measures.
+Direct `order_key` / `line_key` references in the warehouse remain useful
+for dbt integrity tests and drill-through logic. Do not sum order-level and
+line-level gross amounts into the same KPI; they are different grains.
