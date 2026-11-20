@@ -8,13 +8,13 @@ models:
         data_tests: [not_null, unique]
 
   - name: dim_customers
-    description: "One row per verified canonical customer identity observed in orders."
+    description: "One row per canonical customer verified in Silver, including customers without a 2026 order."
     columns:
       - name: customer_key
         data_tests: [not_null, unique]
 
   - name: dim_products
-    description: "One row per source-qualified variant; Shopify canonical product mapping may remain null until verified."
+    description: "One row per source-qualified variant from Silver order lines; Shopify canonical product mapping remains null until independently verified."
     columns:
       - name: variant_key
         data_tests: [not_null, unique]
