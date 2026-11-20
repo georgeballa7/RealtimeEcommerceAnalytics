@@ -196,15 +196,10 @@ def main() -> None:
             verified_source_file(s3, args.bucket, spec)
         plans.append((manifest_key, manifest, "synthetic"))
     if args.live_manifest:
-        parser.error("Live Shopify must be validated by Glue and published to S3 Silver before Redshift load; raw RDS snapshots are not supported")
-        if not args.live_manifest.startswith("warehouse/live_exports/v1/"):
-            parser.error("Unapproved live manifest key")
-        live = read_json(s3, args.bucket, args.live_manifest)
-        if live.get("schema_version") != "rds-live-snapshot-v1":
-            parser.error("Unknown RDS snapshot version")
-        for spec in live["files"].values():
-            verified_source_file(s3, args.bucket, spec)
-        plans.append((args.live_manifest, live, "live"))
+        parser.error(
+            "Raw RDS snapshots must pass the Glue Bronze-to-Silver quality gate "
+            "before being loaded into silver_staging."
+        )
     summary = [{"manifest": key, "kind": kind,
                 "rows": {k: v["rows"] for k, v in m["files"].items()}}
                for key, m, kind in plans]
@@ -216,7 +211,11 @@ def main() -> None:
     ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/silver_staging_schema.sql"
     ddl = [statement.strip() for statement in ddl_path.read_text().split(";") if statement.strip()]
     if not silver_staging_schema_exists(data, workgroup=args.workgroup, database=args.database):
-        ddl.insert(0, 'CREATE SCHEMA silver_staging')
+        raise RuntimeError(
+            "silver_staging schema is absent. Run the reviewed, guarded "
+            "rename_raw_to_silver_staging.py migration first. "
+            "Do not bootstrap a second empty schema over existing historical data."
+        )
     run_data_api(data, workgroup=args.workgroup, database=args.database, statements=ddl)
     for manifest_key, manifest, kind in plans:
         src = (synthetic_statements(args.bucket, args.copy_role_arn, manifest)
