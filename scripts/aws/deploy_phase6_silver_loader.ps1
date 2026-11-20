@@ -56,7 +56,7 @@ try {
     $Cfg = (& aws lambda get-function-configuration --function-name $Function --profile $Profile --region $Region --output json | Out-String | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0 -or $Cfg.PackageType -ne 'Zip' -or
         $Cfg.Runtime -ne 'python3.12' -or $Cfg.Handler -ne 'index.lambda_handler' -or
-        $Cfg.Role -ne "arn:aws:iam::$Account:role/ecommerce-phase6-redshift-loader-demo") {
+        $Cfg.Role -ne "arn:aws:iam::${Account}:role/ecommerce-phase6-redshift-loader-demo") {
         throw 'Unexpected loader Lambda configuration; refused'
     }
     $ControllerArn = "arn:aws:dynamodb:${Region}:${Account}:table/ecommerce-demo-phase5-controller"
