@@ -123,9 +123,14 @@ try {
         Write-Host ("{0}: {1}" -f $_.address, ($_.change.actions -join ","))
     }
     $unsafe = @($changes | Where-Object {
+        $actions = ($_.change.actions -join ",")
+        $allowScriptRefresh = (
+            $_.address -eq 'aws_s3_object.phase6_glue_silver_script[0]' -and
+            $actions -eq "update"
+        )
         ($_.address -notin $allowed) -or
         ($_.change.actions -contains "delete") -or
-        ($_.change.actions -contains "update")
+        (($actions -ne "create") -and (-not $allowScriptRefresh))
     })
     if ($unsafe.Count -gt 0) {
         throw "UNSAFE Terraform diff: changes outside the Phase 6 Glue allowlist. No apply performed."
