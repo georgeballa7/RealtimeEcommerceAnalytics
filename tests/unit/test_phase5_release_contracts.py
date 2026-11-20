@@ -119,3 +119,22 @@ def test_phase6_release_image_helper_does_not_mix_docker_logs_with_uri():
     assert '& docker --config $tempConfig push $imageTag | Out-Host' in source
     assert '$newImage -isnot [string] -or $newGeneratorImage -isnot [string]' in source
     assert 'terraform plan -no-color' in source
+
+def test_phase6_loader_uses_windows_proven_python_validation():
+    """Windows PowerShell 5.1 must not strip embedded Python string quotes."""
+    loader = (ROOT / "scripts/aws/deploy_phase6_silver_loader.ps1").read_text()
+    coordinator = (ROOT / "scripts/aws/deploy_phase6_evening_coordinator.ps1").read_text()
+    safe_ast = "& python -X utf8 -c 'import ast,sys;ast.parse(open(sys.argv[1]).read())' $Source"
+    assert safe_ast in loader
+    assert safe_ast in coordinator
+    assert 'encoding="utf-8"' not in loader
+    assert "--profile $AwsProfile" in loader
+    assert "$Profile = 'ecommerce-admin'" not in loader
+
+
+def test_phase6_zip_validation_is_exercised_on_windows_not_only_parsed():
+    workflow = (ROOT / ".github/workflows/ops-powershell-ci.yml").read_text()
+    assert "runs-on: windows-latest" in workflow
+    assert "shell: powershell" in workflow
+    assert "deploy_phase6_silver_loader.ps1" in workflow
+    assert "deploy_phase6_evening_coordinator.ps1 -ValidateOnly" in workflow
