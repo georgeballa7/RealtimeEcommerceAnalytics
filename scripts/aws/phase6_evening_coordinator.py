@@ -294,25 +294,34 @@ def handler(event, context):
         if state == "SUCCEEDED":
             key = f"warehouse/shopify_snapshots/v1/{previous['batch_id']}/silver_manifest.json"
             aws.client("s3").head_object(Bucket=BUCKET, Key=key)
-            dispatched = aws.client("lambda").invoke(
-                FunctionName=LOADER, InvocationType="Event",
-                Payload=json.dumps({"source": "phase6-" + slot, "run_id": run_id}).encode(),
-            )
-            if dispatched.get("StatusCode") != 202:
-                raise RuntimeError("Silver loader invocation was not accepted")
             next_phase = "dispatched"
         else:
             next_phase = "failed"
-        # Only release the controller stop blocker after Glue is terminal.
+        # Persist dispatch phase BEFORE sending the async request: a fast
+        # warehouse acknowledgment must never be overwritten as pending.
         release(table, owner)
         table.update_item(
             Key={"id": day_id},
-            UpdateExpression="SET phase=:phase, glue_status=:status",
+            UpdateExpression=(
+                "SET phase=:phase, glue_status=:status, "
+                "loader_attempts=:attempts, loader_last_attempt_at=:when"
+            ),
             ConditionExpression="#day=:day AND #owner=:owner",
             ExpressionAttributeNames={"#day": "day", "#owner": "owner"},
             ExpressionAttributeValues={
                 ":phase": next_phase, ":status": state, ":day": day, ":owner": owner,
+                ":attempts": 1 if state == "SUCCEEDED" else 0,
+                ":when": int(now.timestamp()),
             },
         )
+        if state == "SUCCEEDED":
+            dispatched = aws.client("lambda").invoke(
+                FunctionName=LOADER, InvocationType="Event",
+                Payload=json.dumps({
+                    "source": "phase6-" + slot, "run_id": run_id,
+                    "batch_id": previous["batch_id"]}).encode(),
+            )
+            if dispatched.get("StatusCode") != 202:
+                raise RuntimeError("Silver loader invocation was not accepted")
         return log(next_phase, slot=slot, run_id=run_id, glue_status=state)
     raise RuntimeError("Unknown Phase6 coordinator phase: " + str(phase))
