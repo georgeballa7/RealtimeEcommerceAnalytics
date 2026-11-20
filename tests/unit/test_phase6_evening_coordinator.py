@@ -67,10 +67,13 @@ def test_slot_windows_cover_both_berlin_runs_and_summer_time():
     afternoon = datetime(2026, 11, 20, 16, 0, tzinfo=berlin)
     summer = datetime(2026, 7, 20, 8, 0, tzinfo=berlin)
     assert mod.slot_for_time(morning) == "morning"
-    assert mod.slot_for_time(afternoon) == "afternoon"
+    assert mod.slot_for_time(afternoon) is None
+    assert mod.slot_for_time(datetime(2026, 11, 20, 22, 0, tzinfo=berlin)) == "afternoon"
+    assert mod.slot_for_time(datetime(2026, 11, 21, 1, 0, tzinfo=berlin)) == "afternoon"
+    assert mod.processing_day(datetime(2026, 11, 21, 1, 0, tzinfo=berlin), "afternoon") == "2026-11-20"
     assert mod.slot_for_time(summer) == "morning"
     assert mod.slot_for_time(datetime(2026, 11, 20, 7, 55, tzinfo=berlin)) is None
-    assert mod.slot_for_time(datetime(2026, 11, 20, 22, 0, tzinfo=berlin)) is None
+    assert mod.slot_for_time(datetime(2026, 11, 20, 21, 55, tzinfo=berlin)) is None
     assert mod.SLOT_IDS["afternoon"] == "phase6-evening"  # existing ledger retained
     assert mod.SLOT_IDS["morning"] != mod.SLOT_IDS["afternoon"]
 
@@ -112,7 +115,7 @@ def test_coordinator_deployer_preserves_existing_readiness_schedule():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     script = (root / "scripts/aws/deploy_phase6_evening_coordinator.ps1").read_text()
-    assert "cron(0/5 8-21 * * ? *)" in script
+    assert "cron(0/5 0-2,8-15,22-23 * * ? *)" in script
     assert "ecommerce-phase6-evening-glue-demo" in script
     assert "scheduler update-schedule" in script
     assert "scheduler get-schedule" in script
@@ -137,12 +140,12 @@ def test_coordinator_requires_generator_and_lifecycle_marker_before_glue():
     s3.get_object.side_effect = ClientError(
         {"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "GetObject")
     assert mod.quiet_now(now, ctrl, ddb, sqs, ecs, slot="morning", s3=s3) == (
-        "slot_generation_or_lifecycle_not_complete"
+        "generation_morning_not_complete"
     )
     s3.get_object.side_effect = None
     import json
     correct = {"schema_version": 1, "run_id": "live-20261120-morning",
-               "slot": "morning", "generation": "complete", "lifecycle": "settled"}
+               "slot": "morning", "generation": "complete"}
     s3.get_object.return_value = {"Body": io.BytesIO(json.dumps(correct).encode())}
     assert mod.quiet_now(now, ctrl, ddb, sqs, ecs, slot="morning", s3=s3) is None
     assert s3.get_object.call_args.kwargs["Key"].endswith(
@@ -157,7 +160,45 @@ def test_coordinator_rejects_inconsistent_success_marker():
     ctrl = {"schema_ready": True, "webhooks_ready": True}
     s3 = Mock()
     wrong = {"schema_version": 1, "run_id": "live-20261120-morning",
-             "slot": "morning", "generation": "complete", "lifecycle": "pending"}
+             "slot": "morning", "generation": "pending"}
     s3.get_object.return_value = {"Body": io.BytesIO(json.dumps(wrong).encode())}
     with pytest.raises(RuntimeError, match="Invalid or conflicting"):
         mod.quiet_now(now, ctrl, Mock(), Mock(), Mock(), slot="morning", s3=s3)
+
+
+def test_nightly_requires_both_generator_markers_and_lifecycle_settled():
+    import io, json
+    from zoneinfo import ZoneInfo
+    local = datetime(2026, 11, 20, 22, 40, tzinfo=ZoneInfo("Europe/Berlin"))
+    now = local.astimezone(timezone.utc)
+    activity = (now - timedelta(minutes=15)).isoformat()
+    ctrl = {"schema_ready": True, "webhooks_ready": True,
+            "last_event_at": activity, "last_work_at": activity}
+    ddb, sqs, ecs, s3 = Mock(), Mock(), Mock(), Mock()
+    ddb.Table.return_value.query.return_value = {"Items": []}
+    sqs.get_queue_attributes.return_value = {"Attributes": {
+        "ApproximateNumberOfMessages": "0",
+        "ApproximateNumberOfMessagesNotVisible": "0"}}
+    ecs.list_tasks.return_value = {"taskArns": []}
+
+    objects = {
+        "simulation/phase5/slots/v1/live-20261120-morning.json":
+            {"schema_version": 1, "run_id": "live-20261120-morning",
+             "slot": "morning", "generation": "complete"},
+        "simulation/phase5/slots/v1/live-20261120-afternoon.json":
+            {"schema_version": 1, "run_id": "live-20261120-afternoon",
+             "slot": "afternoon", "generation": "complete"},
+        "simulation/phase5/slots/v1/lifecycle-2026-11-20.json":
+            {"schema_version": 1, "day": "2026-11-20",
+             "lifecycle": "settled", "generation_slots": ["morning", "afternoon"]},
+    }
+    from botocore.exceptions import ClientError
+    def get_object(*, Bucket, Key):
+        if Key not in objects:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return {"Body": io.BytesIO(json.dumps(objects[Key]).encode())}
+    s3.get_object.side_effect = get_object
+    assert mod.quiet_now(now, ctrl, ddb, sqs, ecs, slot="afternoon", s3=s3) is None
+    del objects["simulation/phase5/slots/v1/lifecycle-2026-11-20.json"]
+    assert mod.quiet_now(now, ctrl, ddb, sqs, ecs, slot="afternoon", s3=s3) == (
+        "lifecycle_night_not_complete")
