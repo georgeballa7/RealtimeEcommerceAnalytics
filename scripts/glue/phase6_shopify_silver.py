@@ -104,15 +104,7 @@ def add_reasons(frame, table):
     elif table == "shopify_customer_identity":
         reasons += [F.when(~F.col("status").isin("verified", "pending", "unmatched"),
                            F.lit("unrecognized_identity_status"))]
-    return frame.withColumn("dq_reasons", F.array_remove(F.array(*reasons), F.lit(None)))
-
-
-def quarantine_fk(rows, child, parents, on, reason):
-    keys = parents.select(*on).dropDuplicates()
-    missing = rows[child].join(keys, on=on, how="left_anti")
-    accepted = rows[child].join(keys, on=on, how="left_semi")
-    missing = missing.withColumn("dq_reasons", F.array(F.lit(reason)))
-    return accepted, missing
+    return frame.withColumn("dq_reasons", F.filter(F.array(*reasons), lambda value: value.isNotNull()))
 
 
 def ensure_unique(frame, keys, table):
@@ -140,7 +132,7 @@ def discover_part_files(s3, bucket, prefix):
 
 def main():
     parser = argparse.ArgumentParser()
-    for flag in ("bucket", "db-host", "db-name", "db-user", "secret-arn", "batch-id"):
+    for flag in ("bucket", "db-host", "db-name", "secret-arn", "batch-id"):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--region", default="eu-central-1")
     parser.add_argument("--db-port", type=int, default=5432)
@@ -154,6 +146,7 @@ def main():
     secret = json.loads(aws.client("secretsmanager").get_secret_value(
         SecretId=args.secret_arn)["SecretString"])
     password = secret["password"]
+    db_user = secret["username"]
     jdbc = f"jdbc:postgresql://{args.db_host}:{args.db_port}/{args.db_name}?sslmode=require"
     prefix = f"warehouse/shopify_snapshots/v1/{args.batch_id}"
     counts = {}
@@ -163,7 +156,7 @@ def main():
     for table in TABLE_KEYS:
         raw = (spark.read.format("jdbc").option("url", jdbc)
                .option("dbtable", f"public.{table}")
-               .option("user", args.db_user).option("password", password)
+               .option("user", db_user).option("password", password)
                .option("driver", "org.postgresql.Driver").load())
         raw.persist()
         source_rows = raw.count()
@@ -183,10 +176,10 @@ def main():
         ("shopify_live_refund_line", "shopify_live_refund", ["shop_domain", "shopify_refund_id"], "orphan_refund_line"),
     ]
     for child, parent, keys, reason in checks:
-        accepted, orphan = quarantine_fk(valid, child, valid, keys, reason) if False else (
-            valid[child].join(valid[parent].select(*keys).dropDuplicates(), on=keys, how="left_semi"),
-            valid[child].join(valid[parent].select(*keys).dropDuplicates(), on=keys, how="left_anti")
-            .withColumn("dq_reasons", F.array(F.lit(reason))),
+        parent_keys = valid[parent].select(*keys).dropDuplicates()
+        accepted = valid[child].join(parent_keys, on=keys, how="left_semi")
+        orphan = valid[child].join(parent_keys, on=keys, how="left_anti").withColumn(
+            "dq_reasons", F.array(F.lit(reason))
         )
         valid[child] = accepted
         rejects[child] = rejects[child].unionByName(orphan, allowMissingColumns=True)
@@ -205,9 +198,8 @@ def main():
         for layer in ("bronze", "silver", "quarantine")}
     if any(not files["bronze"][t] for t in TABLE_KEYS):
         raise ValueError("Missing Bronze Spark output")
-    if any(not files["silver"][t] for t in TABLE_KEYS):
-        # Spark may not emit a data part for empty datasets: fail closed.
-        raise ValueError("Silver output has no part file; cannot publish")
+    if any(not files["silver"][t] and counts[t]["silver"] > 0 for t in TABLE_KEYS):
+        raise ValueError("Missing expected nonempty Silver output")
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "batch_id": args.batch_id,
