@@ -16,6 +16,7 @@ from botocore.exceptions import ClientError
 
 REGION = "eu-central-1"
 TABLE = "ecommerce-demo-phase5-controller"
+EVENTS_TABLE = "ecommerce-demo-phase5-events"
 CTRL_ID = "phase5-controller"
 DAY_ID = "phase6-evening"
 CLUSTER = "ecommerce-demo"
@@ -53,8 +54,9 @@ def quiet_now(now, controller, dynamodb, sqs, ecs):
     activity = max(event_time, datetime.fromisoformat(last_work)) if last_work else event_time
     if now.timestamp() - activity.timestamp() < QUIET:
         return "ingestion_quiet_window"
-    table = dynamodb.Table(TABLE)
-    pending = table.query(
+    # Pending projected events live in the Phase 5 event index, not the controller table.
+    events = dynamodb.Table(EVENTS_TABLE)
+    pending = events.query(
         IndexName="by_state",
         KeyConditionExpression="#state=:pending",
         ExpressionAttributeNames={"#state": "state"},
