@@ -172,11 +172,24 @@ resource "aws_iam_role_policy" "phase6_coordinator_slot_readiness" {
   role  = basename(data.aws_lambda_function.phase6_existing_coordinator[0].role)
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["s3:GetObject"]
-      Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/slots/v1/*"
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/slots/v1/*"
+      },
+      {
+        # ECS ListTasks authorizes the container-instance resource, not the
+        # cluster ARN. The previously deployed coordinator IAM policy only
+        # allowed the cluster ARN, blocking the nightly readiness check.
+        Effect   = "Allow"
+        Action   = ["ecs:ListTasks"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.aws_account_id}:container-instance/${aws_ecs_cluster.ecommerce.name}/*"
+        Condition = {
+          ArnEquals = { "ecs:cluster" = aws_ecs_cluster.ecommerce.arn }
+        }
+      }
+    ]
   })
 }
 
