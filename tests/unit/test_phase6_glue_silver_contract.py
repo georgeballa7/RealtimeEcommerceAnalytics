@@ -103,12 +103,14 @@ def test_glue_redshift_exact_column_contract():
     for table, schema in glue.CONTRACT.items():
         section = re.search(
             rf"CREATE TABLE IF NOT EXISTS silver_staging\.{table}\s*\((.*?)\)"
-            rf"\s*DISTSTYLE", ddl, re.S
+            rf"\s*DISTSTYLE", ddl, re.DOTALL
         )
         assert section is not None, table
         sql_columns = re.findall(
-            r"(?m)^\s*(\w+)\s+(?:VARCHAR\(\d+\)|BIGINT|INT|"
-            r"DECIMAL\(\d+,\d+\)|TIMESTAMPTZ|BOOLEAN)",
-            section.group(1)
+            r"([A-Za-z_][A-Za-z_0-9]*)\\s+"
+            r"(?:VARCHAR\\(\\d+\\)|BIGINT|INT|"
+            r"DECIMAL\\(\\d+,\\d+\\)|TIMESTAMPTZ|BOOLEAN)"
+            r"(?=\\s|,|$)",
+            section.group(1),
         )
         assert sql_columns == [name for name, _ in schema], table
