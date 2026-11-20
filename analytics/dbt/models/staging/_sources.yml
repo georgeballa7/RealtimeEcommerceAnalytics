@@ -8,15 +8,33 @@ sources:
       - name: synthetic_orders
         columns:
           - name: order_id
+            data_tests: [not_null, unique]
+          - name: customer_id
             data_tests: [not_null]
+          - name: currency
+            data_tests:
+              - accepted_values:
+                  values: ['GBP']
       - name: synthetic_order_items
         columns:
           - name: order_item_id
-            data_tests: [not_null]
+            data_tests: [not_null, unique]
+          - name: order_id
+            data_tests:
+              - not_null
+              - relationships:
+                  to: source('raw', 'synthetic_orders')
+                  field: order_id
       - name: synthetic_cancellations
         columns:
           - name: event_id
-            data_tests: [not_null]
+            data_tests: [not_null, unique]
+          - name: order_id
+            data_tests:
+              - not_null
+              - relationships:
+                  to: source('raw', 'synthetic_orders')
+                  field: order_id
       - name: shopify_live_order
         columns:
           - name: shopify_order_id
