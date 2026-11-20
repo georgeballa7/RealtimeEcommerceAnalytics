@@ -1,7 +1,7 @@
 <#
-Guarded Phase 6 RDS-controller rollout. Builds ONLY the shared Lambda image.
+Guarded Phase 6 rollout. Builds shared Lambda AND Shopify generator images.
 Default: build/push and Terraform plan, no apply. -Apply prompts for approval.
-The generator, projector, lifecycle, RDS, SQS, Glue, and schedules are unchanged.
+Projector, lifecycle, RDS, SQS, Glue and schedule times are unchanged.
 #>
 [CmdletBinding()]
 param([switch]$Apply)
@@ -55,6 +55,8 @@ try {
     $webhookSecret = AwsValue -AwsArgs @('lambda','get-function-configuration','--function-name',$api,'--query','Environment.Variables.SHOPIFY_WEBHOOK_SECRET_ARN')
     $clientSecret = AwsValue -AwsArgs @('secretsmanager','describe-secret','--secret-id','ecommerce/demo/shopify/client-credentials','--query','ARN')
     $generatorTask = AwsValue -AwsArgs @('scheduler','get-schedule','--name','ecommerce-demo-phase5-morning','--query','Target.EcsParameters.TaskDefinitionArn')
+    $afternoonTask = AwsValue -AwsArgs @('scheduler','get-schedule','--name','ecommerce-demo-phase5-afternoon','--query','Target.EcsParameters.TaskDefinitionArn')
+    if ($afternoonTask -ne $generatorTask) { throw 'Morning/afternoon generator task definitions differ; reconcile before release' }
     $lifecycleTask = AwsValue -AwsArgs @('scheduler','get-schedule','--name','ecommerce-demo-phase5-lifecycle','--query','Target.EcsParameters.TaskDefinitionArn')
     $projectorTask = AwsValue -AwsArgs @('lambda','get-function-configuration','--function-name',$controller,'--query','Environment.Variables.PROJECTOR_TASK_DEFINITION')
     $generatorImage = TaskImage $generatorTask
@@ -64,38 +66,45 @@ try {
     & python -m pytest -q
     Assert-Exit 'Regression tests'
     $registry = "$accountId.dkr.ecr.$region.amazonaws.com"
-    $repository = 'ecommerce-phase5-live-lambda-demo'
-    $tag = "phase6-lease-$sha"
-    $imageTag = [string]::Format('{0}/{1}:{2}', $registry, $repository, $tag)
-    $digestResult = & aws ecr list-images --repository-name $repository --filter tagStatus=TAGGED --query "imageIds[?imageTag=='$tag'].imageDigest | [0]" --profile $profileName --region $region --output text
-    Assert-Exit 'Inspect existing ECR image'
-    $digest = ($digestResult | Out-String).Trim()
-    if (-not $digest -or $digest -eq 'None') {
-        & docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load --file (Join-Path $root 'Dockerfile.phase5-lambda') --tag $imageTag $root
-        Assert-Exit 'Build immutable Lambda image'
-        $tempConfig = Join-Path ([IO.Path]::GetTempPath()) ("ecr-controller-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $tempConfig | Out-Null
-        $token = & aws ecr get-login-password --profile $profileName --region $region
-        Assert-Exit 'Get ECR token'
-        $auth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("AWS:$token"))
-        [IO.File]::WriteAllText((Join-Path $tempConfig 'config.json'), (@{auths = @{$registry = @{auth = $auth}}} | ConvertTo-Json -Depth 5 -Compress), (New-Object Text.UTF8Encoding($false)))
-        Remove-Variable token,auth -ErrorAction SilentlyContinue
-        & docker --config $tempConfig push $imageTag
-        Assert-Exit 'Push Lambda image to ECR'
-        $digest = AwsValue -AwsArgs @('ecr','describe-images','--repository-name',$repository,'--image-ids',"imageTag=$tag",'--query','imageDetails[0].imageDigest')
+    $tag = "phase6-release-$sha"
+    # Push using the existing Docker Desktop credential-helper workaround.
+    $tempConfig = Join-Path ([IO.Path]::GetTempPath()) ("ecr-release-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempConfig | Out-Null
+    $token = & aws ecr get-login-password --profile $profileName --region $region
+    Assert-Exit 'Get ECR token'
+    $auth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("AWS:$token"))
+    [IO.File]::WriteAllText((Join-Path $tempConfig 'config.json'), (@{auths = @{$registry = @{auth = $auth}}} | ConvertTo-Json -Depth 5 -Compress), (New-Object Text.UTF8Encoding($false)))
+    Remove-Variable token,auth -ErrorAction SilentlyContinue
+
+    function Build-ReleaseImage([string]$repository, [string]$dockerFile) {
+        $imageTag = [string]::Format('{0}/{1}:{2}', $registry, $repository, $tag)
+        $digestResult = & aws ecr list-images --repository-name $repository --filter tagStatus=TAGGED --query "imageIds[?imageTag=='$tag'].imageDigest | [0]" --profile $profileName --region $region --output text
+        Assert-Exit 'Inspect immutable ECR image'
+        $digest = ($digestResult | Out-String).Trim()
+        if (-not $digest -or $digest -eq 'None') {
+            & docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load --file (Join-Path $root $dockerFile) --tag $imageTag $root
+            Assert-Exit "Build $repository"
+            & docker --config $tempConfig push $imageTag
+            Assert-Exit "Push $repository"
+            $digest = AwsValue -AwsArgs @('ecr','describe-images','--repository-name',$repository,'--image-ids',"imageTag=$tag",'--query','imageDetails[0].imageDigest')
+        }
+        if ($digest -notmatch '^sha256:[a-f0-9]{64}$') { throw "Invalid digest for $repository" }
+        $media = AwsValue -AwsArgs @('ecr','describe-images','--repository-name',$repository,'--image-ids',"imageTag=$tag",'--query','imageDetails[0].imageManifestMediaType')
+        if ($media -notin @('application/vnd.docker.distribution.manifest.v2+json','application/vnd.oci.image.manifest.v1+json')) { throw "Unsupported image type $media" }
+        return [string]::Format('{0}/{1}@{2}', $registry,$repository,$digest)
     }
-    if ($digest -notmatch '^sha256:[a-f0-9]{64}$') { throw 'ECR digest invalid' }
-    $media = AwsValue -AwsArgs @('ecr','describe-images','--repository-name',$repository,'--image-ids',"imageTag=$tag",'--query','imageDetails[0].imageManifestMediaType')
-    if ($media -notin @('application/vnd.docker.distribution.manifest.v2+json','application/vnd.oci.image.manifest.v1+json')) { throw "Unsupported image type $media" }
-    $newImage = [string]::Format('{0}/{1}@{2}', $registry,$repository,$digest)
-    Write-Host "Verified new shared Lambda image: $newImage"
+    $newImage = Build-ReleaseImage 'ecommerce-phase5-live-lambda-demo' 'Dockerfile.phase5-lambda'
+    $newGeneratorImage = Build-ReleaseImage 'ecommerce-phase5-generator-demo' 'Dockerfile.phase5-generator'
+    Write-Host "Verified shared Lambda image: $newImage"
+    Write-Host "Verified generator image: $newGeneratorImage"
+    Write-Host 'Existing projector and lifecycle images will be reused.'
 
     $vars = [ordered]@{
         aws_account_id = $accountId; aws_profile = $profileName; aws_region = $region
         shopify_shop_domain = $domain; shopify_client_credentials_secret_arn = $clientSecret
         shopify_webhook_secret_arn = $webhookSecret
         phase5_lambda_image = $newImage; phase5_projector_image = $projectorImage
-        phase5_generator_image = $generatorImage; phase5_lifecycle_image = $lifecycleImage
+        phase5_generator_image = $newGeneratorImage; phase5_lifecycle_image = $lifecycleImage
         enable_redshift_warehouse = $true; enable_phase6_glue_silver = $true
         enable_phase6_glue_rds_lease = $true
     }
@@ -111,7 +120,7 @@ try {
         Assert-Exit 'Terraform plan'
         $plan = ((& terraform show -json $planPath | Out-String) | ConvertFrom-Json)
         Assert-Exit 'Terraform JSON'
-        $allowed = @('aws_lambda_function.phase5_fastapi[0]','aws_lambda_function.phase5_landing[0]','aws_lambda_function.phase5_controller[0]','aws_iam_role_policy.phase6_controller_glue_inspect[0]')
+        $allowed = @('aws_lambda_function.phase5_fastapi[0]','aws_lambda_function.phase5_landing[0]','aws_lambda_function.phase5_controller[0]','aws_iam_role_policy.phase6_controller_glue_inspect[0]', 'aws_ecs_task_definition.phase5_generator[0]', 'aws_scheduler_schedule.phase5_generation["morning"]', 'aws_scheduler_schedule.phase5_generation["afternoon"]')
         $changes = @($plan.resource_changes | Where-Object { ($_.change.actions -join ',') -ne 'no-op' })
         foreach ($change in $changes) {
             $address = [string]$change.address
@@ -132,12 +141,36 @@ try {
                 if ($address -eq 'aws_lambda_function.phase5_controller[0]') {
                     if ($new.environment[0].variables.PHASE6_GLUE_JOB_NAME -ne 'ecommerce-phase6-shopify-silver-demo') { throw 'Expected Glue job missing from controller environment' }
                 }
+            } elseif ($address -eq 'aws_ecs_task_definition.phase5_generator[0]') {
+                if ($actions -ne 'create,delete' -and $actions -ne 'delete,create') { throw 'Expected only generator task-definition replacement' }
+                $before = $change.change.before
+                $after = $change.change.after
+                $oldContainer = @(($before.container_definitions | ConvertFrom-Json))[0]
+                $newContainer = @(($after.container_definitions | ConvertFrom-Json))[0]
+                if ($oldContainer.image -ne $generatorImage -or $newContainer.image -ne $newGeneratorImage) { throw 'Generator image drift' }
+                $oldContainer.image = $newContainer.image
+                if (($oldContainer | ConvertTo-Json -Depth 50 -Compress) -cne ($newContainer | ConvertTo-Json -Depth 50 -Compress)) { throw 'Unexpected generator container configuration change' }
+                $fields = @($before.PSObject.Properties.Name | Where-Object { $_ -notin @('container_definitions','revision','arn','id','tags_all') })
+                foreach ($field in $fields) {
+                    if (($before.$field | ConvertTo-Json -Depth 50 -Compress) -cne ($after.$field | ConvertTo-Json -Depth 50 -Compress)) { throw "Unexpected generator task attribute: $field" }
+                }
+            } elseif ($address -like 'aws_scheduler_schedule.phase5_generation*') {
+                if ($actions -ne 'update') { throw "Unexpected scheduled task operation: $actions" }
+                $oldTarget = $change.change.before.target[0]
+                $newTarget = $change.change.after.target[0]
+                if ($oldTarget.ecs_parameters[0].task_definition_arn -ne $generatorTask) { throw 'Original scheduled task differs from the deployed ECS definition' }
+                $oldTarget.ecs_parameters[0].task_definition_arn = $newTarget.ecs_parameters[0].task_definition_arn
+                if (($oldTarget | ConvertTo-Json -Depth 50 -Compress) -cne ($newTarget | ConvertTo-Json -Depth 50 -Compress)) { throw 'Unexpected scheduler target mutation' }
+                foreach ($field in $change.change.before.PSObject.Properties.Name) {
+                    if ($field -eq 'target') { continue }
+                    if (($change.change.before.$field | ConvertTo-Json -Depth 50 -Compress) -cne ($change.change.after.$field | ConvertTo-Json -Depth 50 -Compress)) { throw "Unexpected scheduler field: $field" }
+                }
             } elseif ($actions -ne 'create') { throw "UNSAFE IAM operation: $actions" }
         }
-        if ($changes.Count -ne 4) { throw "Expected only 3 Lambda image updates + 1 Glue-read IAM policy, got $($changes.Count)" }
+        if ($changes.Count -ne 7) { throw "Expected 3 Lambda updates, 1 IAM policy, 1 generator task and 2 scheduler targets; got $($changes.Count)" }
         & terraform show $planPath
         Assert-Exit 'Show reviewed plan'
-        Write-Host 'Safety checks passed: no generator, scheduler, RDS or other infrastructure changes.'
+        Write-Host 'Safety checks passed: only shared Lambda updates, generator task/schedule target changes, and Glue-read IAM.'
         if (-not $Apply) {
             Write-Host 'PLAN ONLY. Re-run with -Apply to review and approve deployment.'
             return
@@ -154,11 +187,16 @@ try {
         $actual = AwsValue -AwsArgs @('lambda','get-function','--function-name',$fn,'--query','Code.ImageUri')
         if ($actual -ne $newImage) { throw "Deployed Lambda image mismatch: $fn" }
     }
+    foreach ($schedule in @('morning','afternoon')) {
+        $scheduledTask = AwsValue -AwsArgs @('scheduler','get-schedule','--name',"ecommerce-demo-phase5-$schedule",'--query','Target.EcsParameters.TaskDefinitionArn')
+        $deployedGeneratorImage = TaskImage $scheduledTask
+        if ($deployedGeneratorImage -ne $newGeneratorImage) { throw "Generator image not updated in $schedule schedule" }
+    }
     $glueJob = AwsValue -AwsArgs @('lambda','get-function-configuration','--function-name',$controller,'--query','Environment.Variables.PHASE6_GLUE_JOB_NAME')
     if ($glueJob -ne 'ecommerce-phase6-shopify-silver-demo') { throw 'Controller Glue environment not deployed' }
     $glueAction = AwsValue -AwsArgs @('iam','get-role-policy','--role-name','ecommerce-phase5-controller-demo','--policy-name','phase6-read-glue-status-for-safe-rds-stop','--query','PolicyDocument.Statement[0].Action[0]')
     if ($glueAction -ne 'glue:GetJobRun') { throw 'Controller Glue-read IAM not verified' }
-    Write-Host 'Controller deployed and verified. Generator, RDS, schedules unchanged.'
+    Write-Host 'Controller and generator release verified. Original schedule times, RDS and projector/lifecycle unchanged.'
 }
 finally {
     Pop-Location
