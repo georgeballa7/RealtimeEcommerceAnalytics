@@ -42,4 +42,11 @@ sources:
       - name: shopify_live_order_line
       - name: shopify_live_refund
       - name: shopify_live_refund_line
+      - name: warehouse_load_ledger
+        description: "Committed Silver-to-Redshift manifest lineage; loaded snapshots only."
+        columns:
+          - name: manifest_key
+            data_tests: [not_null, unique]
+          - name: manifest_sha256
+            data_tests: [not_null]
       - name: shopify_customer_identity
