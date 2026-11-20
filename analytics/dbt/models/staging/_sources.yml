@@ -2,6 +2,8 @@ version: 2
 sources:
   - name: raw
     schema: raw
+    quoting:
+      schema: true
     tables:
       - name: synthetic_orders
         columns:
