@@ -125,9 +125,9 @@ class RdsController:
             return "glue_lease_active"
         run_id = state.get(GLUE_LEASE_JOB_RUN_ID)
         if not run_id:
-            # A launcher can crash before StartJobRun; the expired reservation
-            # may be reclaimed, provided no job was started out of band.
-            return None
+            # A process can crash between StartJobRun and recording the run ID.
+            # Fail closed: operator must reconcile and release an orphan lease.
+            return "glue_lease_unverifiable"
         if not self.glue or not self.glue_job_name:
             return "glue_lease_unverifiable"
         try:
