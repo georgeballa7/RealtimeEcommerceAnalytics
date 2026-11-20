@@ -1,0 +1,41 @@
+name: Phase 6 dbt offline validation
+
+on:
+  pull_request:
+    paths:
+      - "analytics/dbt/**"
+      - "pyproject.toml"
+      - ".github/workflows/phase6-dbt-validate.yml"
+  push:
+    branches:
+      - feature/redshift-warehouse-dbt-churn
+    paths:
+      - "analytics/dbt/**"
+      - "pyproject.toml"
+      - ".github/workflows/phase6-dbt-validate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dbt Redshift adapter
+        run: python -m pip install -e ".[warehouse]"
+      - name: Parse project without contacting Redshift
+        env:
+          REDSHIFT_HOST: localhost
+          REDSHIFT_USER: offline_validator
+          REDSHIFT_PASSWORD: nonsecret_placeholder
+        run: |
+          mkdir -p "$RUNNER_TEMP/dbt_profiles"
+          cp analytics/dbt/profiles.example.yml "$RUNNER_TEMP/dbt_profiles/profiles.yml"
+          dbt parse --no-partial-parse \
+            --project-dir analytics/dbt \
+            --profiles-dir "$RUNNER_TEMP/dbt_profiles"
