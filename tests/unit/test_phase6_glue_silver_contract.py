@@ -114,3 +114,36 @@ def test_glue_redshift_exact_column_contract():
             section.group(1),
         )
         assert sql_columns == [name for name, _ in schema], table
+
+
+def test_publish_manifest_works_with_old_glue_botocore():
+    """Old Glue Boto3 must not receive unsupported PutObject.IfNoneMatch."""
+    from botocore.exceptions import ClientError
+
+    class FakeS3:
+        def __init__(self):
+            self.created = None
+            self.exists = False
+
+        def head_object(self, **kwargs):
+            if not self.exists:
+                raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
+            return {"ContentLength": len(self.created["Body"])}
+
+        def put_object(self, **kwargs):
+            if "IfNoneMatch" in kwargs:
+                raise AssertionError("Unsupported bundled Glue botocore parameter")
+            self.created = kwargs
+            self.exists = True
+            return {"ETag": "mock"}
+
+    client = FakeS3()
+    glue.publish_silver_manifest(
+        client, "demo-bucket", "warehouse/shopify_snapshots/v1/batch/silver_manifest.json",
+        {"counts": {"shopify_live_order": {"silver": 20}}},
+    )
+    assert client.created is not None
+    assert client.created["ContentType"] == "application/json"
+    assert b'"silver": 20' in client.created["Body"]
+    with pytest.raises(FileExistsError):
+        glue.publish_silver_manifest(client, "demo-bucket", "same-key", {})
