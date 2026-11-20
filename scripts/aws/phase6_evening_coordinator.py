@@ -202,8 +202,8 @@ def handler(event, context):
         table.update_item(
             Key={"id": DAY_ID},
             UpdateExpression="SET phase=:phase, run_id=:run",
-            ConditionExpression="day=:day AND #owner=:owner",
-            ExpressionAttributeNames={"#owner": "owner"},
+            ConditionExpression="#day=:day AND #owner=:owner",
+            ExpressionAttributeNames={"#day": "day", "#owner": "owner"},
             ExpressionAttributeValues={
                 ":phase": "started", ":run": run_id, ":day": day, ":owner": owner,
             },
@@ -233,8 +233,8 @@ def handler(event, context):
         table.update_item(
             Key={"id": DAY_ID},
             UpdateExpression="SET phase=:phase, glue_status=:status",
-            ConditionExpression="day=:day AND #owner=:owner",
-            ExpressionAttributeNames={"#owner": "owner"},
+            ConditionExpression="#day=:day AND #owner=:owner",
+            ExpressionAttributeNames={"#day": "day", "#owner": "owner"},
             ExpressionAttributeValues={
                 ":phase": next_phase, ":status": state, ":day": day, ":owner": owner,
             },
