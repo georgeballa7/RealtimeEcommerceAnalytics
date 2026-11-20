@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -194,9 +193,9 @@ def inactive_workloads(clients, settings, controller, local, slot):
         return "projector_not_idle"
     last = [controller.get("last_event_at"), controller.get("last_work_at")]
     timestamps = [datetime.fromisoformat(x) for x in last if x]
-    if not timestamps:
+    if not timestamps and not is_stale(local, slot):
         return "no_confirmed_activity"
-    if (datetime.now(timezone.utc) - max(timestamps)).total_seconds() < QUIET_SECONDS:
+    if timestamps and (datetime.now(timezone.utc) - max(timestamps)).total_seconds() < QUIET_SECONDS:
         return "recent_projected_activity"
     for state in ("RUNNING", "PENDING"):
         if clients["ecs"].list_tasks(
