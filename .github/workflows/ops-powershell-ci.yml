@@ -3,9 +3,10 @@ on:
   pull_request:
     paths:
       - "scripts/aws/**"
+      - "tests/test_phase6_glue_launch.ps1"
       - ".github/workflows/ops-powershell-ci.yml"
   push:
-    branches: [main, feature/shopify-live-event-generator]
+    branches: [main, feature/shopify-live-event-generator, feature/redshift-warehouse-dbt-churn]
     paths:
       - "scripts/aws/**"
       - ".github/workflows/ops-powershell-ci.yml"
@@ -34,3 +35,7 @@ jobs:
             }
             Write-Host "Parsed: $($path.Name)"
           }
+
+      - name: Exercise Phase 6 wrapper with mocked native commands
+        shell: pwsh
+        run: ./tests/test_phase6_glue_launch.ps1
