@@ -55,6 +55,18 @@ def stable_key(run_id: str, order_id: str, operation: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"phase5:{run_id}:{order_id}:{operation}"))
 
 
+def selected_for_simulation(run_id: str, order_id: str, kind: str, *,
+                            seed: int, probability_percent: int) -> bool:
+    """Preselect without fetching Shopify order; identical to full-plan draw."""
+    if kind not in {"cancel", "refund"} or not 0 <= probability_percent <= 100:
+        raise ValueError("Invalid synthetic operation selection policy")
+    stable_key(run_id, order_id, kind)
+    digest = hashlib.sha256(
+        f"{seed}:{run_id}:{order_id}:{kind}".encode()).digest()
+    rng = random.Random(int.from_bytes(digest[:8], "big"))
+    return rng.randrange(100) < probability_percent
+
+
 def cancellation_plan(run_id: str, order_id: str, created_at: datetime,
                       *, seed: int, probability_percent: int = 10,
                       max_delay_days: int = 14) -> dict:
