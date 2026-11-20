@@ -39,6 +39,19 @@ def slot_window(local: datetime) -> str | None:
     return None
 
 
+def can_begin_new_warm(local: datetime, slot: str) -> bool:
+    """Do not provision a new gateway for an already-past daily slot.
+
+    An existing open slot may still be recovered later if its NAT disappears.
+    """
+    minute = local.hour * 60 + local.minute
+    if slot == "morning":
+        return 7 * 60 + 30 <= minute < 9 * 60
+    if slot == "afternoon":
+        return 15 * 60 + 30 <= minute < 17 * 60
+    return False
+
+
 def can_consider_release(local: datetime, slot: str) -> bool:
     minute = local.hour * 60 + local.minute
     # Both generator starts and the separate 18:00 lifecycle task need NAT.
@@ -330,6 +343,8 @@ def handler(event, context):
         if existing and existing.get("phase") == "closed":
             return log("completed_no_nat", slot=slot)
         if not existing:
+            if not can_begin_new_warm(local, slot):
+                return log("missed_prewarm_window", slot=slot)
             record_warm(table, today, slot)
         return create_managed_nat(ec2, settings, today, slot)
     finally:
