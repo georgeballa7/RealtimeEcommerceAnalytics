@@ -216,7 +216,7 @@ def main() -> None:
     ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/silver_staging_schema.sql"
     ddl = [statement.strip() for statement in ddl_path.read_text().split(";") if statement.strip()]
     if not silver_staging_schema_exists(data, workgroup=args.workgroup, database=args.database):
-        ddl.insert(0, 'CREATE SCHEMA "raw"')
+        ddl.insert(0, 'CREATE SCHEMA silver_staging')
     run_data_api(data, workgroup=args.workgroup, database=args.database, statements=ddl)
     for manifest_key, manifest, kind in plans:
         src = (synthetic_statements(args.bucket, args.copy_role_arn, manifest)
