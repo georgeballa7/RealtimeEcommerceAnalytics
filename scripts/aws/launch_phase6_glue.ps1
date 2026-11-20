@@ -154,19 +154,42 @@ if (-not $Launch) {
     return
 }
 
+# RDS can be in a scheduled idle-stop transition as the launch begins.
+# Finish that transition before calling StartDBInstance; never issue a start
+# against a "stopping" instance. AWS CLI waiters use read-only describe calls.
 $rdsStatus = Invoke-AwsText -AwsArgs @(
     "rds", "describe-db-instances", "--db-instance-identifier", $DbId,
     "--query", "DBInstances[0].DBInstanceStatus"
 )
+if ($rdsStatus -eq "stopping") {
+    Write-Host "RDS is stopping. Waiting for STOPPED before restarting for Glue."
+    & aws rds wait db-instance-stopped --db-instance-identifier $DbId --region $Region --profile $ProfileName
+    if ($LASTEXITCODE -ne 0) { throw "RDS did not complete its stop transition" }
+    $rdsStatus = Invoke-AwsText -AwsArgs @(
+        "rds", "describe-db-instances", "--db-instance-identifier", $DbId,
+        "--query", "DBInstances[0].DBInstanceStatus"
+    )
+}
 if ($rdsStatus -eq "stopped") {
+    Write-Host "Starting RDS for the on-demand Glue snapshot."
     & aws rds start-db-instance --db-instance-identifier $DbId --region $Region --profile $ProfileName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Failed to start RDS" }
 }
-elseif ($rdsStatus -ne "available" -and $rdsStatus -ne "starting") {
+elseif ($rdsStatus -ne "available" -and $rdsStatus -ne "starting" -and $rdsStatus -ne "configuring-enhanced-monitoring") {
     throw "RDS status $rdsStatus does not allow safe Glue execution"
 }
-& aws rds wait db-instance-available --db-instance-identifier $DbId --region $Region --profile $ProfileName
-if ($LASTEXITCODE -ne 0) { throw "RDS did not reach available status" }
+if ($rdsStatus -ne "available") {
+    & aws rds wait db-instance-available --db-instance-identifier $DbId --region $Region --profile $ProfileName
+    if ($LASTEXITCODE -ne 0) { throw "RDS did not reach available status" }
+}
+# Defend against the controller reinitiating idle-stop while we were waiting.
+$rdsFinalStatus = Invoke-AwsText -AwsArgs @(
+    "rds", "describe-db-instances", "--db-instance-identifier", $DbId,
+    "--query", "DBInstances[0].DBInstanceStatus"
+)
+if ($rdsFinalStatus -ne "available") {
+    throw "RDS changed state to $rdsFinalStatus; refusing Glue snapshot"
+}
 
 $batchId = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
 $runArgsFile = Join-Path ([System.IO.Path]::GetTempPath()) ("phase6-glue-" + $batchId + ".json")
