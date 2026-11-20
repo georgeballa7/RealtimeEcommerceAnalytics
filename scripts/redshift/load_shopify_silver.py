@@ -10,6 +10,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from dataclasses import dataclass
 import boto3
 
 TABLE_KEYS = {
-    "shopify_customer_identity": ("shop_gid", "shopify_customer_gid"),
+    "shopify_customer_identity": ("shop_gid", "customer_id"),
     "shopify_live_order": ("shop_domain", "shopify_order_id"),
     "shopify_live_order_line": ("shop_domain", "shopify_order_id", "shopify_line_id"),
     "shopify_live_refund": ("shop_domain", "shopify_refund_id"),
@@ -232,10 +233,86 @@ def verify_warehouse(client, *, snapshot: Snapshot, workgroup: str, database: st
     return actual
 
 
+
+def discover_manifests(s3, *, bucket: str) -> list[str]:
+    """Discover committed snapshots only; Spark part files are not commits."""
+    results = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=PREFIX):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if (key.endswith("/silver_manifest.json") and
+                    VALID_KEY.fullmatch(key) and key.startswith(PREFIX)):
+                batch = key[len(PREFIX):].split("/", 1)[0]
+                if VALID_BATCH.fullmatch(batch) and key == f"{PREFIX}{batch}/silver_manifest.json":
+                    results.append(key)
+    return sorted(set(results))
+
+
+def process_published_snapshots(*, s3, data, bucket: str, role_arn: str,
+                                workgroup: str, database: str,
+                                manifest_keys: list[str], apply: bool) -> list[dict]:
+    if not query(
+        data, workgroup=workgroup, database=database,
+        sql="SELECT nspname FROM pg_namespace WHERE nspname = 'silver_staging'",
+    ):
+        raise RuntimeError("Expected the existing silver_staging schema")
+    latest = latest_silver_load(data, workgroup=workgroup, database=database)
+    outcomes = []
+    for key in sorted(manifest_keys):
+        snapshot = inspect_snapshot(s3, bucket=bucket, manifest_key=key)
+        decision = assert_newer_snapshot(snapshot, latest)
+        if decision == "ALREADY_LOADED":
+            outcomes.append({"manifest": key, "status": "ALREADY_LOADED"})
+            continue
+        # Older snapshots that already exist in the ledger cannot be reloaded
+        # without rolling the full-snapshot warehouse backwards. Skip them
+        # only after independently checking their exact committed digest.
+        if latest is not None and snapshot.batch_id < latest[0][len(PREFIX):].split("/", 1)[0]:
+            raise RuntimeError("Historical Silver manifest appears after newer warehouse load")
+        verify_silver_rows(s3, bucket=bucket, snapshot=snapshot)
+        if not apply:
+            outcomes.append({"manifest": key, "status": "PENDING", "counts": snapshot.counts})
+            latest = (key, snapshot.digest)
+            continue
+        run_id = execute_snapshot(
+            data, snapshot=snapshot, bucket=bucket, role_arn=role_arn,
+            workgroup=workgroup, database=database,
+        )
+        actual = verify_warehouse(
+            data, snapshot=snapshot, workgroup=workgroup, database=database,
+        )
+        outcomes.append({"manifest": key, "status": "LOADED", "run_id": run_id,
+                         "counts": actual})
+        latest = (key, snapshot.digest)
+    return outcomes
+
+
+def lambda_handler(event, context):
+    """Invoked after a successful Glue job; catch up all unpublished warehouse batches."""
+    bucket = os.environ["SILVER_BUCKET"]
+    role_arn = os.environ["REDSHIFT_COPY_ROLE_ARN"]
+    workgroup = os.environ.get("REDSHIFT_WORKGROUP", "ecommerce-analytics-demo")
+    database = os.environ.get("REDSHIFT_DATABASE", "analytics")
+    s3 = boto3.client("s3")
+    data = boto3.client("redshift-data")
+    keys = discover_manifests(s3, bucket=bucket)
+    if not keys:
+        raise RuntimeError("No completed Glue Silver manifests")
+    result = process_published_snapshots(
+        s3=s3, data=data, bucket=bucket, role_arn=role_arn,
+        workgroup=workgroup, database=database, manifest_keys=keys, apply=True,
+    )
+    print(json.dumps({"status": "WAREHOUSE_CATCHUP", "outcomes": result}, sort_keys=True))
+    return {"loaded": sum(x["status"] == "LOADED" for x in result), "outcomes": result}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--bucket", required=True)
-    p.add_argument("--manifest-key", required=True)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--manifest-key")
+    group.add_argument("--catch-up", action="store_true")
     p.add_argument("--copy-role-arn", required=True)
     p.add_argument("--profile", default="ecommerce-admin")
     p.add_argument("--region", default="eu-central-1")
@@ -249,35 +326,15 @@ def main():
         p.error("Unexpected AWS region or warehouse database")
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
     s3 = session.client("s3")
-    snapshot = inspect_snapshot(s3, bucket=args.bucket, manifest_key=args.manifest_key)
-    verify_silver_rows(s3, bucket=args.bucket, snapshot=snapshot)
-    summary = {"mode": "APPLY" if args.apply else "PREVIEW",
-               "manifest": snapshot.key, "batch": snapshot.batch_id,
-               "manifest_sha256": snapshot.digest, "silver_rows": snapshot.counts}
-    print(json.dumps(summary, indent=2), flush=True)
-    if not args.apply:
-        return
     data = session.client("redshift-data")
-    schema = query(
-        data, workgroup=args.workgroup, database=args.database,
-        sql="SELECT nspname FROM pg_namespace WHERE nspname = 'silver_staging'",
+    keys = discover_manifests(s3, bucket=args.bucket) if args.catch_up else [args.manifest_key]
+    results = process_published_snapshots(
+        s3=s3, data=data, bucket=args.bucket, role_arn=args.copy_role_arn,
+        workgroup=args.workgroup, database=args.database,
+        manifest_keys=keys, apply=args.apply,
     )
-    if not schema:
-        raise RuntimeError("silver_staging is absent. Complete the in-place schema rename first.")
-    latest = latest_silver_load(data, workgroup=args.workgroup, database=args.database)
-    decision = assert_newer_snapshot(snapshot, latest)
-    if decision == "ALREADY_LOADED":
-        counts = verify_warehouse(
-            data, snapshot=snapshot, workgroup=args.workgroup, database=args.database)
-        print(json.dumps({"status": decision, "counts": counts}), flush=True)
-        return
-    run_id = execute_snapshot(
-        data, snapshot=snapshot, bucket=args.bucket,
-        role_arn=args.copy_role_arn, workgroup=args.workgroup, database=args.database,
-    )
-    counts = verify_warehouse(
-        data, snapshot=snapshot, workgroup=args.workgroup, database=args.database)
-    print(json.dumps({"status": "LOADED", "id": run_id, "counts": counts}), flush=True)
+    print(json.dumps({"mode": "APPLY" if args.apply else "PREVIEW",
+                      "snapshots": results}, indent=2), flush=True)
 
 
 if __name__ == "__main__":
