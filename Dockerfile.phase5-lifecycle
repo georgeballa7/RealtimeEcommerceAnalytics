@@ -7,6 +7,7 @@ COPY pyproject.toml ./
 COPY src/ ./src/
 COPY scripts/run_phase5_lifecycle.py ./scripts/
 COPY config/phase4-simulation-policy.json ./config/phase4-simulation-policy.json
+COPY config/phase5-synthetic-refund-policy.json ./config/phase5-synthetic-refund-policy.json
 RUN pip install --no-cache-dir ".[shopify,aws]" && useradd --system --uid 10001 ecommerce
 USER ecommerce
 ENTRYPOINT ["python", "scripts/run_phase5_lifecycle.py"]
