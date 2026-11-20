@@ -16,16 +16,16 @@ import boto3
 
 SYNTHETIC_HEAD = "historical/online_retail_ii/synthetic/v1/state/head.json"
 SYNTHETIC_TABLES = {
-    "orders": ("landing.synthetic_orders", "order_id"),
-    "order_items": ("landing.synthetic_order_items", "order_item_id"),
-    "cancellations": ("landing.synthetic_cancellations", "event_id"),
+    "orders": (""raw".synthetic_orders", "order_id"),
+    "order_items": (""raw".synthetic_order_items", "order_item_id"),
+    "cancellations": (""raw".synthetic_cancellations", "event_id"),
 }
 LIVE_TABLES = {
-    "shopify_live_order": "landing.shopify_live_order",
-    "shopify_live_order_line": "landing.shopify_live_order_line",
-    "shopify_live_refund": "landing.shopify_live_refund",
-    "shopify_live_refund_line": "landing.shopify_live_refund_line",
-    "shopify_customer_identity": "landing.shopify_customer_identity",
+    "shopify_live_order": ""raw".shopify_live_order",
+    "shopify_live_order_line": ""raw".shopify_live_order_line",
+    "shopify_live_refund": ""raw".shopify_live_refund",
+    "shopify_live_refund_line": ""raw".shopify_live_refund_line",
+    "shopify_customer_identity": ""raw".shopify_customer_identity",
 }
 SAFE_S3_KEY = re.compile(r"^[a-zA-Z0-9_./=-]+$")
 SAFE_ARN = re.compile(r"^arn:aws:iam::[0-9]{12}:role/[a-zA-Z0-9_+=,.@/-]+$")
@@ -104,7 +104,7 @@ def run_data_api(client, *, workgroup: str, database: str, statements: list[str]
     raise TimeoutError("Redshift statement state uncertain; reconcile before replay")
 
 
-def landing_schema_exists(client, *, workgroup: str, database: str,
+def raw_schema_exists(client, *, workgroup: str, database: str,
                       timeout: int = 120) -> bool:
     """Check the catalog before adding CREATE SCHEMA to the DDL batch.
 
@@ -113,7 +113,7 @@ def landing_schema_exists(client, *, workgroup: str, database: str,
     """
     execution_id = client.execute_statement(
         WorkgroupName=workgroup, Database=database,
-        Sql="SELECT 1 FROM pg_namespace WHERE nspname = 'landing'",
+        Sql="SELECT 1 FROM pg_namespace WHERE nspname = 'raw'",
     )["Id"]
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -212,10 +212,10 @@ def main() -> None:
     if not args.apply:
         return
     data = session.client("redshift-data")
-    ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/landing_schema.sql"
+    ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/raw_schema.sql"
     ddl = [statement.strip() for statement in ddl_path.read_text().split(";") if statement.strip()]
-    if not landing_schema_exists(data, workgroup=args.workgroup, database=args.database):
-        ddl.insert(0, 'CREATE SCHEMA landing')
+    if not raw_schema_exists(data, workgroup=args.workgroup, database=args.database):
+        ddl.insert(0, 'CREATE SCHEMA "raw"')
     run_data_api(data, workgroup=args.workgroup, database=args.database, statements=ddl)
     for manifest_key, manifest, kind in plans:
         src = (synthetic_statements(args.bucket, args.copy_role_arn, manifest)
@@ -226,9 +226,9 @@ def main() -> None:
         ).hexdigest()
         escaped = manifest_key.replace("'", "''")
         src.append(
-            "INSERT INTO landing.warehouse_load_ledger (load_id,manifest_key,manifest_sha256,source_type) "
+            "INSERT INTO "raw".warehouse_load_ledger (load_id,manifest_key,manifest_sha256,source_type) "
             f"SELECT '{manifest_sha}','{escaped}','{manifest_sha}','{kind}' "
-            f"WHERE NOT EXISTS (SELECT 1 FROM landing.warehouse_load_ledger WHERE load_id='{manifest_sha}')"
+            f"WHERE NOT EXISTS (SELECT 1 FROM "raw".warehouse_load_ledger WHERE load_id='{manifest_sha}')"
         )
         outcome = run_data_api(data, workgroup=args.workgroup, database=args.database,
                                statements=src)
