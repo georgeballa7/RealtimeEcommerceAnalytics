@@ -6,6 +6,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $entry = Join-Path $root 'scripts/aws/launch_phase6_glue.ps1'
 $global:ObservedPlan = $false
 $global:MockUnsafe = $false
+$global:MockScriptRefresh = $false
 $global:MockApplyCalls = 0
 
 function global:aws {
@@ -77,6 +78,9 @@ function global:terraform {
             if ($global:MockUnsafe) {
                 return '{"resource_changes":[{"address":"aws_scheduler_schedule.phase5_generation","change":{"actions":["update"]}}]}'
             }
+            if ($global:MockScriptRefresh) {
+                return '{"resource_changes":[{"address":"aws_s3_object.phase6_glue_silver_script[0]","change":{"actions":["update"]}}]}'
+            }
             return '{"resource_changes":[{"address":"aws_glue_job.phase6_shopify_silver[0]","change":{"actions":["create"]}}]}'
         }
         'apply' {
@@ -102,3 +106,12 @@ if (-not $blocked) { throw 'Unsafe Terraform change was not rejected' }
 if ($global:MockApplyCalls -ne 0) { throw 'Unsafe Terraform change reached apply' }
 
 Write-Host 'Verified: Terraform native args, JSON var-file, Phase 5 preservation, allowlist rejection.'
+
+# A change to the Glue source-script object alone is a safe applied update.
+$global:MockUnsafe = $false
+$global:MockScriptRefresh = $true
+& $entry -Apply
+if ($global:MockApplyCalls -ne 1) {
+    throw 'Glue script refresh was unexpectedly blocked or applied more than once'
+}
+Write-Host 'Verified: only the Glue script object can update in-place.'
