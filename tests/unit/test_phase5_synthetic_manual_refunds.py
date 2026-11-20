@@ -106,7 +106,8 @@ def test_scheduled_refund_selection_accepts_only_proven_generated_manual(monkeyp
     operations = list(run_phase5_lifecycle.eligible_synthetic_refunds(
         gql, [(RUN_ID, ORDER_ID)],
         now=datetime(2026, 11, 20, 22, 0, tzinfo=timezone.utc),
-        policy={"seed": 20261118},
+        policy={"seed": 20261118, "cancellation_probability_percent": 10,
+                "cancellation_delay_max_days": 14},
         refund_policy={"probability_percent": 5, "max_delay_days": 2},
     ))
     assert len(operations) == 1
@@ -118,7 +119,8 @@ def test_scheduled_refund_selection_accepts_only_proven_generated_manual(monkeyp
     assert list(run_phase5_lifecycle.eligible_synthetic_refunds(
         gql, [(RUN_ID, ORDER_ID)],
         now=datetime(2026, 11, 20, 22, 0, tzinfo=timezone.utc),
-        policy={"seed": 20261118},
+        policy={"seed": 20261118, "cancellation_probability_percent": 10,
+                "cancellation_delay_max_days": 14},
         refund_policy={"probability_percent": 5, "max_delay_days": 2},
     )) == []
 
