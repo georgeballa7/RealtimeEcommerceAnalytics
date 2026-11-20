@@ -7,7 +7,7 @@ select
   i.unit_price as unit_price_gbp,
   i.line_amount as gross_line_gbp,
   'synthetic_2026' as source_system
-from {{ source('raw','synthetic_order_items') }} i
+from {{ source('landing','synthetic_order_items') }} i
 union all
 select
   'shopify:' || i.shop_domain || ':' || cast(i.shopify_line_id as varchar(30)) as line_key,
@@ -18,4 +18,4 @@ select
   i.unit_price as unit_price_gbp,
   (i.quantity * i.unit_price - coalesce(i.discount_total,0)) as gross_line_gbp,
   'shopify_live' as source_system
-from {{ source('raw','shopify_live_order_line') }} i
+from {{ source('landing','shopify_live_order_line') }} i
