@@ -51,9 +51,9 @@ def test_redshift_raw_schema_bootstrap_is_repeatable():
     assert "if not raw_schema_exists" in loader
     assert 'CREATE TABLE IF NOT EXISTS "raw".synthetic_orders' in schema_sql
     assert 'CREATE TABLE IF NOT EXISTS raw.' not in schema_sql
-    assert r'\\"raw\\".synthetic_orders' in loader
+    assert '"raw".synthetic_orders' in loader.replace('\\"', '"')
     sources = (ROOT / "analytics/dbt/models/staging/_sources.yml").read_text()
-    assert "quoting:\\n      schema: true" in sources
+    assert "quoting:\n      schema: true" in sources
 
 
 def test_analytics_retains_synthetic_label_and_temporal_churn_window():
