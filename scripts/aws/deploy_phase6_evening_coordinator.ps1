@@ -114,7 +114,7 @@ try {
     $scheduleJson = & aws scheduler get-schedule --name $ScheduleName --profile $AwsProfile --region $Region --output json
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect current Glue readiness schedule' }
     $schedule = ($scheduleJson | Out-String | ConvertFrom-Json)
-    $expectedTarget = "arn:aws:lambda:$Region:825414820081:function:$FunctionName"
+    $expectedTarget = ('arn:aws:lambda:{0}:825414820081:function:{1}' -f $Region, $FunctionName)
     if ($schedule.Target.Arn -ne $expectedTarget -or
         $schedule.State -ne 'ENABLED' -or
         $schedule.ScheduleExpressionTimezone -ne 'Europe/Berlin' -or
