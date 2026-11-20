@@ -136,8 +136,8 @@ def main():
     args = ap.parse_args()
     if args.apply != args.confirm_apply:
         ap.error("Applying mutations requires --apply --confirm-apply")
-    if not 1 <= args.limit <= 100:
-        ap.error("Limit must be between 1 and 100")
+    if not 1 <= args.limit <= (500 if args.require_settled else 100):
+        ap.error("Limit must be 1..100 (standalone) or 1..500 (combined slot)")
     if bool(args.refund_order) != bool(args.refund_line):
         ap.error("Refund order and line must both be supplied")
     if args.refund_order and not args.run_id:
