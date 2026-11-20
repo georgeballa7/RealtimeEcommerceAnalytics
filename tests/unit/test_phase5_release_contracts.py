@@ -138,3 +138,15 @@ def test_phase6_zip_validation_is_exercised_on_windows_not_only_parsed():
     assert "shell: powershell" in workflow
     assert "deploy_phase6_silver_loader.ps1" in workflow
     assert "deploy_phase6_evening_coordinator.ps1 -ValidateOnly" in workflow
+
+
+def test_phase6_coordinator_list_tasks_iam_matches_ecs_authorization_resource():
+    """ListTasks authorizes container-instance ARNs, not the ECS cluster ARN."""
+    tf = (ROOT / "infrastructure/terraform/phase6_glue_silver.tf").read_text()
+    policy = tf.split('resource "aws_iam_role_policy" "phase6_coordinator_slot_readiness"', 1)[1]
+    policy = policy.split('resource "aws_iam_role_policy" "phase6_silver_loader_ack"', 1)[0]
+    assert 'Action   = ["ecs:ListTasks"]' in policy
+    assert 'container-instance/${aws_ecs_cluster.ecommerce.name}/*' in policy
+    assert 'ArnEquals = { "ecs:cluster" = aws_ecs_cluster.ecommerce.arn }' in policy
+    assert 'Action   = ["s3:GetObject"]' in policy
+    assert 'Resource = "*"' not in policy
