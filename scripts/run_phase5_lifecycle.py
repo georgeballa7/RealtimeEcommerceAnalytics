@@ -165,10 +165,6 @@ def main():
     ap.add_argument("--refund-order", help="Existing Shopify order GID for explicit refund")
     ap.add_argument("--refund-line", help="Existing Shopify line-item GID")
     ap.add_argument("--refund-quantity", type=int)
-    ap.add_argument("--refund-backfill-percent", type=int, metavar="PERCENT",
-                    help=("Manual synthetic-only refund catch-up (6..40%%); "
-                          "uses immediate due dates. Does not cancel orders, "
-                          "change the daily policy, or publish the nightly marker."))
     ap.add_argument("--limit", type=int, default=100)
     ap.add_argument("--commit-nightly", action="store_true",
                     help="Commit the 22:00 lifecycle only after settled operations")
@@ -179,11 +175,6 @@ def main():
         ap.error("Nightly lifecycle requires --apply --confirm-apply --require-settled without explicit refund")
     if args.apply != args.confirm_apply:
         ap.error("Applying mutations requires --apply --confirm-apply")
-    if args.refund_backfill_percent is not None:
-        if not 6 <= args.refund_backfill_percent <= 40:
-            ap.error("Synthetic refund backfill rate must be 6..40 percent")
-        if args.refund_order or args.commit_nightly:
-            ap.error("Refund backfill cannot include explicit refunds or nightly marker commits")
     if not 1 <= args.limit <= (500 if args.require_settled else 100):
         ap.error("Limit must be 1..100 (standalone) or 1..500 (combined slot)")
     if bool(args.refund_order) != bool(args.refund_line):
@@ -229,29 +220,15 @@ def main():
             ids = args.run_id or recent_generation_run_ids(s3, bucket, now)
             gen_records = completed_generation_records(s3, bucket, run_ids=ids)
             generation = list(gen_records)
-            if args.refund_backfill_percent is None:
-                operations = list(eligible_cancellations(
-                    gql, generation, now=now, policy=policy, journal=journal))
-                active_refund_policy = refund_policy
-            else:
-                # A one-off replay must not silently change daily cancellation
-                # behavior or widen the recurring 5% refund schedule.
-                operations = []
-                active_refund_policy = {
-                    **refund_policy, "probability_percent": args.refund_backfill_percent,
-                    "max_delay_days": 0,
-                }
+            operations = list(eligible_cancellations(gql, generation, now=now, policy=policy, journal=journal))
             operations.extend(eligible_synthetic_refunds(
-                gql, generation, now=now, policy=policy,
-                refund_policy=active_refund_policy, journal=journal))
+                gql, generation, now=now, policy=policy, refund_policy=refund_policy, journal=journal))
             # A backlog of previously completed operations must not starve new
             # refunds/cancellations under the existing per-run limit.
             operations = [op for op in operations
                           if (journal.get(op.key) or {}).get("state") != "complete"]
             operations.sort(key=lambda op: (op.requested_at, op.key))
-        stats = {"mode": "APPLY" if args.apply else "PREVIEW", "seen": 0,
-                 "eligible_operations": len(operations),
-                 "outcomes": {}, "refund_backfill_percent": args.refund_backfill_percent}
+        stats = {"mode": "APPLY" if args.apply else "PREVIEW", "seen": 0, "outcomes": {}}
         if args.require_settled and (not args.apply or len(operations) > args.limit):
             raise RuntimeError("Scheduled lifecycle cannot certify an incomplete or preview batch")
         pending = []
