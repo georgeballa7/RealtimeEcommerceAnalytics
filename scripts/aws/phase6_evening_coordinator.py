@@ -8,7 +8,7 @@ the existing idempotent Silver-to-Redshift loader. No extra generator runs.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -22,7 +22,7 @@ CTRL_ID = "phase5-controller"
 # Keep the original afternoon key to preserve existing same-day run records.
 # The morning slot gets a distinct idempotency key in the SAME controller table.
 SLOT_IDS = {"morning": "phase6-morning", "afternoon": "phase6-evening"}
-SLOT_HOURS = {"morning": range(8, 16), "afternoon": range(16, 22)}
+SLOT_HOURS = {"morning": range(8, 16), "afternoon": (22, 23, 0, 1, 2)}
 CLUSTER = "ecommerce-demo"
 RDS_ID = "ecommerce-postgres-dev"
 JOB = "ecommerce-phase6-shopify-silver-demo"
@@ -51,17 +51,30 @@ def quiet_now(now, controller, dynamodb, sqs, ecs, *, slot="afternoon", s3=None)
     if s3 is not None:
         from botocore.exceptions import ClientError
         local = now.astimezone(ZoneInfo("Europe/Berlin"))
-        run_id = f"live-{local:%Y%m%d}-{slot}"
-        key = f"simulation/phase5/slots/v1/{run_id}.json"
-        try:
-            marker = json.loads(s3.get_object(Bucket=BUCKET, Key=key)["Body"].read())
-        except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}:
-                return "slot_generation_or_lifecycle_not_complete"
-            raise
-        if marker != {"schema_version": 1, "run_id": run_id, "slot": slot,
-                      "generation": "complete", "lifecycle": "settled"}:
-            raise RuntimeError("Invalid or conflicting Phase 5 combined slot marker")
+        pipeline_day = processing_day(local, slot)
+        compact_day = pipeline_day.replace("-", "")
+        required = [("generation", slot)]
+        if slot == "afternoon":
+            required.extend([("generation", "morning"), ("lifecycle", "night")])
+        for kind, marker_slot in required:
+            if kind == "generation":
+                run_id = f"live-{compact_day}-{marker_slot}"
+                key = f"simulation/phase5/slots/v1/{run_id}.json"
+                expected = {"schema_version": 1, "run_id": run_id,
+                            "slot": marker_slot, "generation": "complete"}
+            else:
+                key = f"simulation/phase5/slots/v1/lifecycle-{pipeline_day}.json"
+                expected = {"schema_version": 1, "day": pipeline_day,
+                            "lifecycle": "settled",
+                            "generation_slots": ["morning", "afternoon"]}
+            try:
+                marker = json.loads(s3.get_object(Bucket=BUCKET, Key=key)["Body"].read())
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}:
+                    return f"{kind}_{marker_slot}_not_complete"
+                raise
+            if marker != expected:
+                raise RuntimeError(f"Invalid or conflicting readiness marker: {key}")
     last_event = controller.get("last_event_at")
     if not last_event:
         return "no_projected_slot_events"
@@ -69,9 +82,10 @@ def quiet_now(now, controller, dynamodb, sqs, ecs, *, slot="afternoon", s3=None)
     if slot not in SLOT_IDS:
         raise ValueError("Unknown pipeline slot")
     start_hour = 8 if slot == "morning" else 16
-    cutoff = now.astimezone(ZoneInfo("Europe/Berlin")).replace(
-        hour=start_hour, minute=0, second=0, microsecond=0
-    ).astimezone(timezone.utc)
+    local_day = processing_day(now.astimezone(ZoneInfo("Europe/Berlin")), slot)
+    cutoff = datetime.fromisoformat(local_day).replace(
+        hour=start_hour, minute=0, second=0, microsecond=0,
+        tzinfo=ZoneInfo("Europe/Berlin")).astimezone(timezone.utc)
     if event_time < cutoff:
         return "no_events_after_slot_start"
     last_work = controller.get("last_work_at")
@@ -170,6 +184,14 @@ def release(control, owner):
     )
 
 
+def processing_day(local, slot):
+    """After midnight the 22:00 lifecycle belongs to yesterday in Berlin."""
+    day = local.date()
+    if slot == "afternoon" and local.hour < 3:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
 def slot_for_time(local):
     """Which generator slot can advance in the current Berlin local time window?"""
     return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
@@ -182,13 +204,13 @@ def handler(event, context):
     if slot is None:
         return log("outside_slot_readiness_windows")
     day_id = SLOT_IDS[slot]
-    day = local.date().isoformat()
+    day = processing_day(local, slot)
     aws = boto3.Session(region_name=REGION)
     ddb = aws.resource("dynamodb")
     table = ddb.Table(TABLE)
-    # If a morning run is still in progress at 16:00, complete that run
-    # before permitting the afternoon slot to reserve a new Glue/RDS lease.
-    # This protects delayed Glue jobs during the schedule boundary.
+    # A morning Glue run still active at 22:00 must complete before the
+    # nightly lifecycle snapshot reserves its own RDS/Glue lease.
+    # Prevent overlapping Glue full-state extracts.
     if slot == "afternoon":
         morning = table.get_item(
             Key={"id": SLOT_IDS["morning"]}, ConsistentRead=True
