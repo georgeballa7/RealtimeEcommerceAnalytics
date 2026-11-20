@@ -4,24 +4,4 @@ groups:
   - name: dimensional_warehouse
     owner:
       name: RealtimeEcommerceAnalytics
-    description: "Conformed Redshift warehouse: shared dimensions and explicit event-grain facts."
-
-models:
-  - name: dim_customers
-    group: dimensional_warehouse
-    description: "Canonical verified customer IDs; do not infer identity from raw Shopify GIDs."
-    columns:
-      - name: customer_key
-        data_tests: [not_null, unique]
-  - name: dim_products
-    group: dimensional_warehouse
-    description: "Source-qualified variants; no unverified Shopify-to-history SKU matching."
-    columns:
-      - name: variant_key
-        data_tests: [not_null, unique]
-  - name: dim_date
-    group: dimensional_warehouse
-    description: "Conformed calendar dates for fact event dates."
-    columns:
-      - name: date_key
-        data_tests: [not_null, unique]
+    description: "Conformed Redshift warehouse source of truth for sales fact and dimension models."
