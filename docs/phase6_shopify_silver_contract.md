@@ -62,7 +62,7 @@ the catalog and identity-sync evidence before unifying the star-schema facts.
   introduce an explicit source snapshot / coordinated CDC boundary before
   enabling concurrent production-scale extraction.
 - Use one JDBC reader per table initially to avoid saturating the small RDS.
-- Never run the job when RDS is stopping/restarting.
+- Never run the job when RDS is stopping/restarting. The Phase 5 controller\n  must hold an explicit RDS-in-use lease for the entire Glue job; its current\n  idle shutdown logic has not yet been updated to recognize Glue execution.\n- Confirm the source table set and all five types from the actual PostgreSQL\n  catalog, and keep a stable no-writes boundary across the full extract.
 - No automatic triggers until an end-to-end manual run is verified.
 - All Glue AWS resources are Terraform opt-in; enable only after an inspected
   plan preserves the existing Phase 5 generator, controller and schedules.
