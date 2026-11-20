@@ -131,3 +131,77 @@ def test_schema_gate_prevents_processing_before_migration():
     assert db.starts == 0
     state.record["schema_ready"] = True
     assert c.advance(T0+timedelta(minutes=1)) == "rds_start_requested"
+
+
+class FakeGlue:
+    def __init__(self, status="RUNNING", fails=False):
+        self.status, self.fails, self.queries = status, fails, 0
+    def get_job_run(self, **kwargs):
+        self.queries += 1
+        if self.fails:
+            raise RuntimeError("Glue API not accessible")
+        return {"JobRun": {"JobRunState": self.status}}
+
+
+def test_active_glue_lease_prevents_rds_idle_stop():
+    c, control, index, db, ecs = setup()
+    db.status = "available"
+    assert c.advance(T0) == "idle_window_started"
+    control.record.update({
+        "glue_lease_owner": "run-123",
+        "glue_lease_expires_at": int((T0 + timedelta(hours=1)).timestamp()),
+    })
+    assert c.advance(T0 + timedelta(minutes=40)) == "glue_lease_active"
+    assert db.stops == 0
+
+
+def test_expired_lease_with_running_glue_fails_closed():
+    c, control, index, db, ecs = setup()
+    db.status = "available"
+    glue = FakeGlue("RUNNING")
+    c.glue, c.glue_job_name = glue, "ecommerce-phase6-shopify-silver-demo"
+    assert c.advance(T0) == "idle_window_started"
+    control.record.update({
+        "glue_lease_owner": "run-123",
+        "glue_lease_expires_at": int((T0 + timedelta(minutes=10)).timestamp()),
+        "glue_lease_job_run_id": "jr_123",
+    })
+    assert c.advance(T0 + timedelta(minutes=40)) == "glue_job_running"
+    assert glue.queries > 0 and db.stops == 0
+
+
+def test_expired_lease_glue_api_failure_does_not_stop_rds():
+    c, control, index, db, ecs = setup()
+    db.status = "available"
+    c.glue, c.glue_job_name = FakeGlue(fails=True), "job"
+    assert c.advance(T0) == "idle_window_started"
+    control.record.update({
+        "glue_lease_owner": "run-123",
+        "glue_lease_expires_at": int((T0 + timedelta(minutes=10)).timestamp()),
+        "glue_lease_job_run_id": "jr_123",
+    })
+    assert c.advance(T0 + timedelta(minutes=40)) == "glue_lease_unverifiable"
+    assert db.stops == 0
+
+
+def test_expired_lease_succeeded_glue_may_stop_after_idle():
+    c, control, index, db, ecs = setup()
+    db.status = "available"
+    c.glue, c.glue_job_name = FakeGlue("SUCCEEDED"), "job"
+    assert c.advance(T0) == "idle_window_started"
+    control.record.update({
+        "glue_lease_owner": "run-123",
+        "glue_lease_expires_at": int((T0 + timedelta(minutes=10)).timestamp()),
+        "glue_lease_job_run_id": "jr_123",
+    })
+    assert c.advance(T0 + timedelta(minutes=40)) == "rds_stop_requested"
+    assert db.stops == 1
+
+
+def test_invalid_glue_lease_fails_closed():
+    c, control, index, db, ecs = setup()
+    db.status = "available"
+    assert c.advance(T0) == "idle_window_started"
+    control.record.update({"glue_lease_owner": "run-123", "glue_lease_expires_at": "invalid"})
+    assert c.advance(T0 + timedelta(minutes=40)) == "glue_lease_invalid"
+    assert db.stops == 0
