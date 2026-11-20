@@ -20,6 +20,8 @@ def handler(event, context):
         security_groups=os.environ["PROJECTOR_SECURITY_GROUPS"].split(","),
         idle_minutes=int(os.environ.get("RDS_IDLE_MINUTES", "30")),
         automatic_stop_enabled=os.environ.get("ALLOW_AUTOMATIC_RDS_STOP", "false").lower() == "true",
+        glue=boto3.client("glue", region_name=region),
+        glue_job_name=os.environ.get("PHASE6_GLUE_JOB_NAME"),
     )
     try:
         action = controller.advance()
