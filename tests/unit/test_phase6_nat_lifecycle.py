@@ -36,15 +36,18 @@ def test_nat_prewarm_windows(month, day, hour, minute, expected):
     assert mod.slot_window(local) == expected
 
 
-def test_nat_is_retained_for_18_00_lifecycle_ecs_task():
+def test_nat_is_retained_for_22_00_lifecycle_ecs_task():
     at = lambda h, m: datetime(2026, 11, 21, h, m, tzinfo=BERLIN)
     assert not mod.can_consider_release(at(7, 55), "morning")
     assert mod.can_consider_release(at(8, 30), "morning")
     assert not mod.can_consider_release(at(17, 59), "afternoon")
     assert not mod.can_consider_release(at(18, 20), "afternoon")
-    assert mod.can_consider_release(at(18, 25), "afternoon")
+    assert not mod.can_consider_release(at(18, 25), "afternoon")
+    assert not mod.can_consider_release(at(22, 20), "afternoon")
+    assert mod.can_consider_release(at(22, 25), "afternoon")
     assert mod.is_stale(at(14, 0), "morning")
-    assert mod.is_stale(at(23, 0), "afternoon")
+    assert not mod.is_stale(at(23, 0), "afternoon")
+    assert mod.is_stale(at(3, 0), "afternoon")
 
 
 def test_nat_routes_can_be_created_only_when_absent():
@@ -129,15 +132,12 @@ def test_morning_and_afternoon_use_distinct_daily_nat_records():
     assert mod.slot_key(day, "morning") == "phase6-nat:2026-11-21:morning"
 
 
-def test_nat_release_window_advances_only_after_legacy_cutover(monkeypatch):
-    at = datetime(2026, 11, 21, 16, 35, tzinfo=BERLIN)
-    monkeypatch.delenv("PHASE5_LEGACY_LIFECYCLE_ENABLED", raising=False)
-    assert not mod.can_consider_release(at, "afternoon")
+def test_nat_release_window_preserves_night_even_after_18_00(monkeypatch):
+    at = datetime(2026, 11, 21, 18, 35, tzinfo=BERLIN)
     monkeypatch.setenv("PHASE5_LEGACY_LIFECYCLE_ENABLED", "false")
-    assert mod.can_consider_release(at, "afternoon")
-    monkeypatch.setenv("PHASE5_LEGACY_LIFECYCLE_ENABLED", "true")
     assert not mod.can_consider_release(at, "afternoon")
-
+    at = datetime(2026, 11, 22, 1, 10, tzinfo=BERLIN)
+    assert mod.can_consider_release(at, "afternoon")
 
 def test_terraform_legacy_schedule_defaults_to_preserved_until_verified():
     script = (ROOT / "infrastructure/terraform/phase5_scheduled_lifecycle.tf").read_text()
