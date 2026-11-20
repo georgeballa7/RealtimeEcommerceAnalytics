@@ -123,11 +123,13 @@ class Operation:
         return stable_key(self.run_id, self.order_id, self.kind)
 
     def as_record(self):
-        return {"run_id": self.run_id, "order_id": self.order_id,
-                "kind": self.kind, "operation_id": self.key,
-                "requested_at": self.requested_at, "line_item_id": self.line_item_id,
-                "quantity": self.quantity,
-                "synthetic_nonfinancial": self.synthetic_nonfinancial}
+        record = {"run_id": self.run_id, "order_id": self.order_id,
+                  "kind": self.kind, "operation_id": self.key,
+                  "requested_at": self.requested_at, "line_item_id": self.line_item_id,
+                  "quantity": self.quantity}
+        if self.synthetic_nonfinancial:
+            record["synthetic_nonfinancial"] = True
+        return record
 
 
 def _snapshot(gql, order_id: str) -> dict:
