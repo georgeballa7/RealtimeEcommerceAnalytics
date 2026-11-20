@@ -118,3 +118,46 @@ def test_coordinator_deployer_preserves_existing_readiness_schedule():
     assert "scheduler get-schedule" in script
     assert "FlexibleTimeWindow" in script
     assert "Europe/Berlin" in script
+
+
+def test_coordinator_requires_generator_and_lifecycle_marker_before_glue():
+    import io
+    from zoneinfo import ZoneInfo
+    now = datetime(2026, 11, 20, 8, 35, tzinfo=ZoneInfo("Europe/Berlin")).astimezone(timezone.utc)
+    source_time = (now - timedelta(minutes=15)).isoformat()
+    ctrl = {"schema_ready": True, "webhooks_ready": True,
+            "last_event_at": source_time, "last_work_at": source_time}
+    ddb, sqs, ecs, s3 = Mock(), Mock(), Mock(), Mock()
+    ddb.Table.return_value.query.return_value = {"Items": []}
+    sqs.get_queue_attributes.return_value = {"Attributes": {
+        "ApproximateNumberOfMessages": "0",
+        "ApproximateNumberOfMessagesNotVisible": "0"}}
+    ecs.list_tasks.return_value = {"taskArns": []}
+    from botocore.exceptions import ClientError
+    s3.get_object.side_effect = ClientError(
+        {"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "GetObject")
+    assert mod.quiet_now(now, ctrl, ddb, sqs, ecs, slot="morning", s3=s3) == (
+        "slot_generation_or_lifecycle_not_complete"
+    )
+    s3.get_object.side_effect = None
+    import json
+    correct = {"schema_version": 1, "run_id": "live-20261120-morning",
+               "slot": "morning", "generation": "complete", "lifecycle": "settled"}
+    s3.get_object.return_value = {"Body": io.BytesIO(json.dumps(correct).encode())}
+    assert mod.quiet_now(now, ctrl, ddb, sqs, ecs, slot="morning", s3=s3) is None
+    assert s3.get_object.call_args.kwargs["Key"].endswith(
+        "live-20261120-morning.json"
+    )
+
+
+def test_coordinator_rejects_inconsistent_success_marker():
+    import io, json, pytest
+    from zoneinfo import ZoneInfo
+    now = datetime(2026, 11, 20, 8, 35, tzinfo=ZoneInfo("Europe/Berlin")).astimezone(timezone.utc)
+    ctrl = {"schema_ready": True, "webhooks_ready": True}
+    s3 = Mock()
+    wrong = {"schema_version": 1, "run_id": "live-20261120-morning",
+             "slot": "morning", "generation": "complete", "lifecycle": "pending"}
+    s3.get_object.return_value = {"Body": io.BytesIO(json.dumps(wrong).encode())}
+    with pytest.raises(RuntimeError, match="Invalid or conflicting"):
+        mod.quiet_now(now, ctrl, Mock(), Mock(), Mock(), slot="morning", s3=s3)
