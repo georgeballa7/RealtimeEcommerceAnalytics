@@ -7,8 +7,10 @@ COPY pyproject.toml ./
 COPY src/ ./src/
 COPY scripts/generate_shopify_live_orders.py ./scripts/generate_shopify_live_orders.py
 COPY scripts/phase5_slot_runner.py ./scripts/phase5_slot_runner.py
+COPY scripts/run_phase5_lifecycle.py ./scripts/run_phase5_lifecycle.py
 COPY config/catalog/phase5-gbp-sku-prices-v1.json ./config/catalog/phase5-gbp-sku-prices-v1.json
 COPY config/phase4-simulation-policy.json ./config/phase4-simulation-policy.json
+COPY config/phase5-synthetic-refund-policy.json ./config/phase5-synthetic-refund-policy.json
 # Windows Git checkout may turn the final LF into CRLF. Match the already
 # validated Phase 5 pricing Dockerfile: normalize line endings ONLY, verify
 # the original approved byte digest, then write canonical LF inside the image.
