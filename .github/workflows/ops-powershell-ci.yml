@@ -47,3 +47,7 @@ jobs:
       - name: Exercise launch wrapper under Windows PowerShell 5.1
         shell: powershell
         run: .\\tests\\test_phase6_glue_launch.ps1
+
+      - name: Validate coordinator Lambda ZIP with Windows PowerShell 5.1
+        shell: powershell
+        run: .\\scripts\\aws\\deploy_phase6_evening_coordinator.ps1 -ValidateOnly
