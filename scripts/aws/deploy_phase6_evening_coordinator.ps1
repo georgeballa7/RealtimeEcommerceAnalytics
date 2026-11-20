@@ -37,7 +37,7 @@ try {
         -not $sourceText.Contains('ConditionExpression="#day=:day AND #owner=:owner"')) {
         throw 'Coordinator source does not contain the committed DynamoDB fixes'
     }
-    & python -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $Source
+    & python -X utf8 -c 'import ast,sys;ast.parse(open(sys.argv[1]).read())' $Source
     if ($LASTEXITCODE -ne 0) { throw 'Coordinator Python syntax check failed' }
 
     New-Item -ItemType Directory -Path $Temp -Force | Out-Null
@@ -50,7 +50,7 @@ try {
     $verifyDir = Join-Path $Temp 'verify'
     Expand-Archive -LiteralPath $zip -DestinationPath $verifyDir
     $files = @(Get-ChildItem -LiteralPath $verifyDir -File -Recurse)
-    if ($files.Count -ne 1 -or $files[0].Name -ne 'index.py') {
+    if ($files.Count -ne 1 -or $files[0].FullName -ne (Join-Path $verifyDir 'index.py')) {
         throw 'Lambda ZIP must contain one root-level index.py'
     }
     if ((Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ne
