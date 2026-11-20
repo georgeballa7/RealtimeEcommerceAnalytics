@@ -23,9 +23,11 @@ def obtain_credentials(*, region: str, workgroup: str, database: str, client=Non
         raise ValueError("Redshift workgroup/database must be configured")
     if client is None:
         client = boto3.client("redshift-serverless", region_name=region)
+    # The namespace's default database is analytics. Omitting dbName avoids
+    # needing a separate IAM dbname resource grant; the SQL connection below
+    # still explicitly verifies that it reached the analytics database.
     credentials = client.get_credentials(
         workgroupName=workgroup,
-        dbName=database,
         durationSeconds=3600,
     )
     username = credentials.get("dbUser")
