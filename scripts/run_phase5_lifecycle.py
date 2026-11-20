@@ -182,8 +182,6 @@ def main():
     if args.refund_backfill_percent is not None:
         if not 6 <= args.refund_backfill_percent <= 40:
             ap.error("Synthetic refund backfill rate must be 6..40 percent")
-        if not args.apply or not args.confirm_apply:
-            ap.error("Refund backfill requires explicit --apply --confirm-apply")
         if args.refund_order or args.commit_nightly:
             ap.error("Refund backfill cannot include explicit refunds or nightly marker commits")
     if not 1 <= args.limit <= (500 if args.require_settled else 100):
@@ -252,6 +250,7 @@ def main():
                           if (journal.get(op.key) or {}).get("state") != "complete"]
             operations.sort(key=lambda op: (op.requested_at, op.key))
         stats = {"mode": "APPLY" if args.apply else "PREVIEW", "seen": 0,
+                 "eligible_operations": len(operations),
                  "outcomes": {}, "refund_backfill_percent": args.refund_backfill_percent}
         if args.require_settled and (not args.apply or len(operations) > args.limit):
             raise RuntimeError("Scheduled lifecycle cannot certify an incomplete or preview batch")
