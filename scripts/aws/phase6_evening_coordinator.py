@@ -7,9 +7,7 @@ but launches at most one Glue snapshot per day, after writes are quiescent.
 from __future__ import annotations
 
 import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
