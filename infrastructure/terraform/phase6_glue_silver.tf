@@ -157,3 +157,25 @@ resource "aws_glue_job" "phase6_shopify_silver" {
 output "phase6_glue_silver_job_name" {
   value = var.enable_phase6_glue_silver ? aws_glue_job.phase6_shopify_silver[0].name : null
 }
+
+# Phase 6 coordinator was originally deployed outside this Terraform module.
+# Its existing execution role needs read-only access to the new, immutable
+# successful-combined-slot marker before Glue may proceed.
+data "aws_lambda_function" "phase6_existing_coordinator" {
+  count         = var.enable_phase6_glue_silver ? 1 : 0
+  function_name = "ecommerce-phase6-evening-glue-coordinator-${var.environment}"
+}
+
+resource "aws_iam_role_policy" "phase6_coordinator_slot_readiness" {
+  count = var.enable_phase6_glue_silver ? 1 : 0
+  name  = "read-phase5-combined-slot-commit-marker"
+  role  = basename(data.aws_lambda_function.phase6_existing_coordinator[0].role)
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/slots/v1/*"
+    }]
+  })
+}
