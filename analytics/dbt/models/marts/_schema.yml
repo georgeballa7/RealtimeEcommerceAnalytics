@@ -1,38 +1,163 @@
 version: 2
+
 models:
+  - name: dim_date
+    description: "One row per calendar date, 2026-2040. Conformed to all fact event dates."
+    columns:
+      - name: date_key
+        data_tests: [not_null, unique]
+
+  - name: dim_customers
+    description: "One row per verified canonical customer identity observed in orders."
+    columns:
+      - name: customer_key
+        data_tests: [not_null, unique]
+
+  - name: dim_products
+    description: "One row per source-qualified variant; Shopify canonical product mapping may remain null until verified."
+    columns:
+      - name: variant_key
+        data_tests: [not_null, unique]
+      - name: source_system
+        data_tests: [not_null]
+
   - name: fct_orders
-    description: Synthetic historical and Shopify orders, source-tagged; live orders may also be synthetic.
+    description: "One row per source-qualified order. GBP only; current_gbp is latest known order state, not captured payment."
     columns:
       - name: order_key
         data_tests: [not_null, unique]
+      - name: customer_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: order_date_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
       - name: currency
         data_tests:
+          - not_null
           - accepted_values:
               values: ['GBP']
+      - name: order_timestamp_utc
+        data_tests: [not_null]
+      - name: source_system
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['synthetic_2026', 'shopify_live']
+      - name: gross_gbp
+        data_tests: [not_null]
+      - name: current_gbp
+        data_tests: [not_null]
+
   - name: fct_order_lines
+    description: "One row per source-qualified order line; item amounts are merchandise measures and are not payment settlements."
     columns:
       - name: line_key
         data_tests: [not_null, unique]
       - name: order_key
         data_tests:
+          - not_null
           - relationships:
               to: ref('fct_orders')
               field: order_key
+      - name: variant_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: variant_key
+      - name: customer_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: order_date_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: quantity
+        data_tests: [not_null]
+      - name: gross_line_gbp
+        data_tests: [not_null]
+
   - name: fct_cancellations
+    description: "One simulated cancellation event; not evidence of captured payment or verified refund."
     columns:
       - name: cancellation_key
         data_tests: [not_null, unique]
+      - name: order_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('fct_orders')
+              field: order_key
+      - name: line_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('fct_order_lines')
+              field: line_key
+      - name: cancellation_date_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+
   - name: fct_refund_lines
+    description: "One recorded Shopify refund line; not verified payment settlement."
     columns:
       - name: refund_line_key
         data_tests: [not_null, unique]
-  - name: dim_customers
+      - name: order_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('fct_orders')
+              field: order_key
+      - name: refund_date_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+
+  - name: mart_daily_sales
+    description: "Power BI order-date summary, source and synthetic flag separated; cancellations are a separate merchandise measure."
+    columns:
+      - name: order_date
+        data_tests: [not_null]
+      - name: source_system
+        data_tests: [not_null]
+      - name: orders
+        data_tests: [not_null]
+
+  - name: mart_customer_churn_training
+    description: "As-of customer-month panel with a forward 30-day label. Feature time validity requires immutable historical event values."
+    columns:
+      - name: customer_key
+        data_tests: [not_null]
+      - name: as_of_date
+        data_tests: [not_null]
+      - name: churn_next_30d
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+
+  - name: mart_customer_churn_scoring
+    description: "Current unlabeled customer features for future MLflow predictions."
     columns:
       - name: customer_key
         data_tests: [not_null, unique]
-  - name: mart_customer_churn_training
-    columns:
-      - name: churn_next_30d
-        data_tests:
-          - accepted_values:
-              values: [0, 1]
+      - name: as_of_date
+        data_tests: [not_null]
