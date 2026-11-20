@@ -142,6 +142,30 @@ def discover_part_files(s3, bucket, prefix):
     return sorted(files)
 
 
+
+def publish_silver_manifest(s3, bucket, manifest_key, manifest):
+    """Commit completed Silver metadata last, compatible with Glue 5.0 botocore.
+
+    Non-atomic HEAD + PUT relies on unique batch IDs and Glue's one-run limit.
+    Do not use this helper for concurrent writers on a shared batch ID.
+    """
+    from botocore.exceptions import ClientError
+
+    try:
+        s3.head_object(Bucket=bucket, Key=manifest_key)
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") not in (
+            "404", "NoSuchKey", "NotFound"
+        ):
+            raise
+    else:
+        raise FileExistsError("Silver manifest already exists: " + manifest_key)
+    s3.put_object(
+        Bucket=bucket, Key=manifest_key,
+        Body=json.dumps(manifest, sort_keys=True).encode(),
+        ContentType="application/json",
+    )
+
 def main():
     parser = argparse.ArgumentParser()
     for flag in ("bucket", "db-host", "db-name", "secret-arn", "batch-id"):
@@ -252,26 +276,7 @@ def main():
     }
     # Manifest is commit marker, written only after all data quality checks pass.
     manifest_key = f"{prefix}/silver_manifest.json"
-    # AWS Glue 5.0's bundled botocore may reject PutObject.IfNoneMatch at
-    # parameter validation. Use a fail-closed existence check and a unique
-    # batch ID. Glue is limited to one concurrent run by Terraform.
-    # The versioned bucket retains historical object versions.
-    from botocore.exceptions import ClientError
-
-    try:
-        s3.head_object(Bucket=args.bucket, Key=manifest_key)
-    except ClientError as error:
-        if error.response.get("Error", {}).get("Code") not in (
-            "404", "NoSuchKey", "NotFound"
-        ):
-            raise
-    else:
-        raise FileExistsError("Silver manifest already exists: " + manifest_key)
-    s3.put_object(
-        Bucket=args.bucket, Key=manifest_key,
-        Body=json.dumps(manifest, sort_keys=True).encode(),
-        ContentType="application/json",
-    )
+    publish_silver_manifest(s3, args.bucket, manifest_key, manifest)
     print(json.dumps({"manifest": f"{prefix}/silver_manifest.json",
                       "counts": counts}, sort_keys=True))
 
