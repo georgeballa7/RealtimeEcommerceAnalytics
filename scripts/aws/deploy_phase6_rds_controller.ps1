@@ -14,6 +14,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $terraformDir = Join-Path $root 'infrastructure\terraform'
 $tempConfig = $null
 $tfvarsPath = $null
+$planJsonPath = $null
 $planPath = Join-Path $terraformDir 'phase6-controller-reviewed.tfplan'
 
 function Assert-Exit([string]$step) {
@@ -127,56 +128,26 @@ try {
         # it contains secret ARNs and immutable image URIs.
         & terraform plan -no-color "-var-file=$tfvarsPath" "-out=$planPath"
         Assert-Exit 'Terraform plan'
-        $plan = ((& terraform show -json $planPath | Out-String) | ConvertFrom-Json)
+        # Compare structured Terraform values, not ConvertTo-Json text: the
+        # provider can reorder ECS environment and secret entries without
+        # changing their meaning. Every actual configuration difference remains
+        # a hard failure, with field paths but no secret values in the output.
+        $planJson = (& terraform show -json $planPath | Out-String)
         Assert-Exit 'Terraform JSON'
-        $allowed = @('aws_lambda_function.phase5_fastapi[0]','aws_lambda_function.phase5_landing[0]','aws_lambda_function.phase5_controller[0]','aws_iam_role_policy.phase6_controller_glue_inspect[0]', 'aws_ecs_task_definition.phase5_generator[0]', 'aws_scheduler_schedule.phase5_generation["morning"]', 'aws_scheduler_schedule.phase5_generation["afternoon"]')
-        $changes = @($plan.resource_changes | Where-Object { ($_.change.actions -join ',') -ne 'no-op' })
-        foreach ($change in $changes) {
-            $address = [string]$change.address
-            $actions = ($change.change.actions -join ',')
-            Write-Host "$address : $actions"
-            if ($address -notin $allowed) { throw "UNSAFE unexpected Terraform resource: $address" }
-            if ($address -like 'aws_lambda_function.*') {
-                if ($actions -ne 'update') { throw "UNSAFE Lambda replacement: $address" }
-                $old = $change.change.before; $new = $change.change.after
-                if ($new.image_uri -ne $newImage) { throw "UNSAFE image target: $address" }
-                $allowedFields = if ($address -eq 'aws_lambda_function.phase5_controller[0]') { @('image_uri','environment') } else { @('image_uri') }
-                foreach ($field in $old.PSObject.Properties.Name) {
-                    if ($field -in $allowedFields) { continue }
-                    if (($old.$field | ConvertTo-Json -Depth 15 -Compress) -cne ($new.$field | ConvertTo-Json -Depth 15 -Compress)) {
-                        throw "UNSAFE attribute changed in $address : $field"
-                    }
-                }
-                if ($address -eq 'aws_lambda_function.phase5_controller[0]') {
-                    if ($new.environment[0].variables.PHASE6_GLUE_JOB_NAME -ne 'ecommerce-phase6-shopify-silver-demo') { throw 'Expected Glue job missing from controller environment' }
-                }
-            } elseif ($address -eq 'aws_ecs_task_definition.phase5_generator[0]') {
-                if ($actions -ne 'create,delete' -and $actions -ne 'delete,create') { throw 'Expected only generator task-definition replacement' }
-                $before = $change.change.before
-                $after = $change.change.after
-                $oldContainer = @(($before.container_definitions | ConvertFrom-Json))[0]
-                $newContainer = @(($after.container_definitions | ConvertFrom-Json))[0]
-                if ($oldContainer.image -ne $generatorImage -or $newContainer.image -ne $newGeneratorImage) { throw 'Generator image drift' }
-                $oldContainer.image = $newContainer.image
-                if (($oldContainer | ConvertTo-Json -Depth 50 -Compress) -cne ($newContainer | ConvertTo-Json -Depth 50 -Compress)) { throw 'Unexpected generator container configuration change' }
-                $fields = @($before.PSObject.Properties.Name | Where-Object { $_ -notin @('container_definitions','revision','arn','id','tags_all') })
-                foreach ($field in $fields) {
-                    if (($before.$field | ConvertTo-Json -Depth 50 -Compress) -cne ($after.$field | ConvertTo-Json -Depth 50 -Compress)) { throw "Unexpected generator task attribute: $field" }
-                }
-            } elseif ($address -like 'aws_scheduler_schedule.phase5_generation*') {
-                if ($actions -ne 'update') { throw "Unexpected scheduled task operation: $actions" }
-                $oldTarget = $change.change.before.target[0]
-                $newTarget = $change.change.after.target[0]
-                if ($oldTarget.ecs_parameters[0].task_definition_arn -ne $generatorTask) { throw 'Original scheduled task differs from the deployed ECS definition' }
-                $oldTarget.ecs_parameters[0].task_definition_arn = $newTarget.ecs_parameters[0].task_definition_arn
-                if (($oldTarget | ConvertTo-Json -Depth 50 -Compress) -cne ($newTarget | ConvertTo-Json -Depth 50 -Compress)) { throw 'Unexpected scheduler target mutation' }
-                foreach ($field in $change.change.before.PSObject.Properties.Name) {
-                    if ($field -eq 'target') { continue }
-                    if (($change.change.before.$field | ConvertTo-Json -Depth 50 -Compress) -cne ($change.change.after.$field | ConvertTo-Json -Depth 50 -Compress)) { throw "Unexpected scheduler field: $field" }
-                }
-            } elseif ($actions -ne 'create') { throw "UNSAFE IAM operation: $actions" }
-        }
-        if ($changes.Count -ne 7) { throw "Expected 3 Lambda updates, 1 IAM policy, 1 generator task and 2 scheduler targets; got $($changes.Count)" }
+        $planJsonPath = Join-Path ([IO.Path]::GetTempPath()) (
+            "phase6-plan-" + [guid]::NewGuid().ToString('N') + '.json'
+        )
+        [IO.File]::WriteAllText(
+            $planJsonPath, $planJson, (New-Object Text.UTF8Encoding($false))
+        )
+        & python (Join-Path $root 'scripts\aws\validate_phase6_release_plan.py') `
+            --plan $planJsonPath `
+            --old-lambda-image $imageController `
+            --new-lambda-image $newImage `
+            --old-generator-image $generatorImage `
+            --new-generator-image $newGeneratorImage `
+            --generator-task $generatorTask
+        Assert-Exit 'Semantic seven-resource release plan validation'
         & terraform show $planPath
         Assert-Exit 'Show reviewed plan'
         Write-Host 'Safety checks passed: only shared Lambda updates, generator task/schedule target changes, and Glue-read IAM.'
@@ -210,6 +181,7 @@ try {
 finally {
     Pop-Location
     if ($tfvarsPath) { Remove-Item -LiteralPath $tfvarsPath -Force -ErrorAction SilentlyContinue }
+    if ($planJsonPath) { Remove-Item -LiteralPath $planJsonPath -Force -ErrorAction SilentlyContinue }
     if ($tempConfig) { Remove-Item -LiteralPath $tempConfig -Recurse -Force -ErrorAction SilentlyContinue }
     if (Test-Path $planPath) { Remove-Item -LiteralPath $planPath -Force -ErrorAction SilentlyContinue }
 }
