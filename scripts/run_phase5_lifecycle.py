@@ -106,8 +106,15 @@ def eligible_synthetic_refunds(gql, records, *, now, policy, refund_policy, jour
             max_delay_days=refund_policy["max_delay_days"])
         if not plan["selected"] or datetime.fromisoformat(plan["due_at"]) > now:
             continue
-        # Transactionless only. No successful, pending or unknown gateway funds.
-        if order.get("transactions") != [] or order.get("displayFinancialStatus") not in {"PENDING", "VOIDED"}:
+        # Allow sandbox payments marked test by Shopify; refuse real gateways.
+        transactions = order.get("transactions")
+        if not isinstance(transactions, list):
+            continue
+        if transactions:
+            if any(not isinstance(tx, dict) or tx.get("test") is not True
+                   for tx in transactions):
+                continue
+        elif order.get("displayFinancialStatus") not in {"PENDING", "VOIDED"}:
             continue
         lines = order.get("lineItems") or {}
         if (lines.get("pageInfo") or {}).get("hasNextPage"):
@@ -191,9 +198,9 @@ def main():
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     refund_policy = json.loads((policy_path.parent / "phase5-synthetic-refund-policy.json").read_text(encoding="utf-8"))
     if (refund_policy["version"] != "phase5-synthetic-refund-policy-v1"
-            or refund_policy["mode"] != "transactionless_shopify_refund_only"
+            or refund_policy["mode"] != "development_store_test_gateway_only"
             or refund_policy["currency"] != "GBP"
-            or refund_policy["payment_transactions_allowed"] is not False
+            or refund_policy["allow_test_transactions"] is not True
             or refund_policy["refund_quantity_per_order"] != 1
             or refund_policy["restock_type"] != "NO_RESTOCK"):
         raise RuntimeError("Unreviewed or unsafe automatic synthetic refund policy")
