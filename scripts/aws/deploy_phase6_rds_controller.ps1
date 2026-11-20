@@ -103,7 +103,11 @@ try {
     if ($newImage -isnot [string] -or $newGeneratorImage -isnot [string] -or $newLifecycleImage -isnot [string]) {
         throw 'Image helper returned non-scalar output; aborting before Terraform'
     }
-    if ($newImage -notmatch '@sha256:[a-f0-9]{64}
+    if (-not $newImage.Contains('@sha256:') -or
+        -not $newGeneratorImage.Contains('@sha256:') -or
+        -not $newLifecycleImage.Contains('@sha256:')) {
+        throw 'Release images must be immutable digest-pinned ECR URIs'
+    }
     Write-Host "Verified shared Lambda image: $newImage"
     Write-Host "Verified generator image: $newGeneratorImage"
     Write-Host "Verified 22:00 lifecycle image: $newLifecycleImage"
