@@ -10,9 +10,13 @@ All CLI calls use the ecommerce-admin AWS profile. No recurring schedule created
 [CmdletBinding()]
 param(
     [switch]$Apply,
-    [switch]$Launch
+    [switch]$Launch,
+    [switch]$UseGlueLease
 )
 $ErrorActionPreference = "Stop"
+if ($UseGlueLease -and -not $Launch) {
+    throw "-UseGlueLease requires -Launch"
+}
 Set-StrictMode -Version Latest
 $ProfileName = "ecommerce-admin"
 $Region = "eu-central-1"
@@ -63,6 +67,19 @@ $generatorImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "
 $lifecycleImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "--task-definition", $lifecycleTask, "--query", "taskDefinition.containerDefinitions[0].image")
 $projectorImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "--task-definition", $projectorTask, "--query", "taskDefinition.containerDefinitions[0].image")
 
+# The live Lambda environment is the rollout gate: never assume a controller
+# can honor Glue leases merely because code exists in the Git branch.
+if ($UseGlueLease) {
+    $liveGlueJob = Invoke-AwsText -AwsArgs @(
+        "lambda", "get-function-configuration", "--function-name",
+        "ecommerce-demo-phase5-controller", "--query",
+        "Environment.Variables.PHASE6_GLUE_JOB_NAME"
+    )
+    if ($liveGlueJob -ne $JobName) {
+        throw "Live RDS controller is not configured for this Glue lease. Do not launch protected mode."
+    }
+}
+
 # The proven Phase 5 release supplied these exact settings via Terraform CLI.
 # Avoid native PowerShell argument splitting entirely: serialize variables to a
 # temporary .tfvars.json file and pass ONE -var-file=... argument to Terraform.
@@ -80,6 +97,7 @@ $tfSettings = [ordered]@{
     phase5_lifecycle_image = $lifecycleImage
     enable_redshift_warehouse = $true
     enable_phase6_glue_silver = $true
+    enable_phase6_glue_rds_lease = [bool]$UseGlueLease
 }
 $tfvarsPath = Join-Path ([System.IO.Path]::GetTempPath()) (
     "phase6-glue-" + [guid]::NewGuid().ToString("N") + ".tfvars.json"
@@ -154,6 +172,18 @@ if (-not $Launch) {
     return
 }
 
+$leaseOwner = $null
+$leaseRunAttached = $false
+$LeaseHelper = Join-Path $Root "scripts\aws\phase6_glue_rds_lease.py"
+try {
+    if ($UseGlueLease) {
+        $leaseReservation = & python $LeaseHelper reserve --profile $ProfileName --region $Region
+        if ($LASTEXITCODE -ne 0) { throw "Unable to acquire Glue RDS processing lease" }
+        $leaseOwner = (($leaseReservation | Out-String) | ConvertFrom-Json).owner
+        if (-not $leaseOwner) { throw "Lease helper did not return a reservation owner" }
+        Write-Host "Acquired controller-coordinated Glue RDS lease."
+    }
+
 # RDS can be in a scheduled idle-stop transition as the launch begins.
 # Finish that transition before calling StartDBInstance; never issue a start
 # against a "stopping" instance. AWS CLI waiters use read-only describe calls.
@@ -208,8 +238,21 @@ finally {
     Remove-Item -LiteralPath $runArgsFile -ErrorAction SilentlyContinue
 }
 Write-Host "Glue started: $JobName / $runId (batch $batchId)"
+if ($UseGlueLease) {
+    & python $LeaseHelper attach --owner $leaseOwner --run-id $runId --profile $ProfileName --region $Region
+    if ($LASTEXITCODE -ne 0) {
+        throw "Glue started but lease attachment failed; leaving lease for reconciliation"
+    }
+    $leaseRunAttached = $true
+}
 for ($poll = 0; $poll -lt 45; $poll++) {
     Start-Sleep -Seconds 30
+    if ($UseGlueLease) {
+        & python $LeaseHelper renew --owner $leaseOwner --profile $ProfileName --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            throw "Glue lease renewal failed; keep RDS available and reconcile job manually"
+        }
+    }
     $run = & aws glue get-job-run --job-name $JobName --run-id $runId --region $Region --profile $ProfileName --output json | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw "Glue run status unavailable" }
     $state = $run.JobRun.JobRunState
@@ -231,3 +274,19 @@ if ($manifest.schema_version -ne "shopify-live-silver-v1") {
 }
 Write-Host "Verified Silver manifest: s3://$Bucket/$manifestKey"
 $manifest.counts | ConvertTo-Json -Depth 8
+
+}
+finally {
+    if ($UseGlueLease -and $leaseOwner) {
+        if ($leaseRunAttached) {
+            # The helper releases only after authoritative Glue TERMINAL state.
+            & python $LeaseHelper release --owner $leaseOwner --profile $ProfileName --region $Region
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Glue lease retained: run has not been verified terminal. Reconcile manually."
+            }
+        }
+        else {
+            Write-Warning "Glue lease retained because run attachment was not verified. Reconcile before retry."
+        }
+    }
+}
