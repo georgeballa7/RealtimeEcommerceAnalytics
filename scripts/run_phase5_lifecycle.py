@@ -15,7 +15,8 @@ from pathlib import Path
 
 from ecommerce.application.use_cases.shopify_order_lifecycle import (
     ORDER_QUERY, Operation, advance, cancellation_plan, synthetic_refund_plan,
-    selected_for_simulation, stable_key,
+    selected_for_simulation, stable_key, require_nonfinancial_simulation,
+    LifecycleError,
 )
 from ecommerce.infrastructure.aws.lifecycle_journal import S3LifecycleJournal
 from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyClientCredentials, ShopifyGraphQLClient
@@ -106,15 +107,10 @@ def eligible_synthetic_refunds(gql, records, *, now, policy, refund_policy, jour
             max_delay_days=refund_policy["max_delay_days"])
         if not plan["selected"] or datetime.fromisoformat(plan["due_at"]) > now:
             continue
-        # Allow sandbox payments marked test by Shopify; refuse real gateways.
-        transactions = order.get("transactions")
-        if not isinstance(transactions, list):
-            continue
-        if transactions:
-            if any(not isinstance(tx, dict) or tx.get("test") is not True
-                   for tx in transactions):
-                continue
-        elif order.get("displayFinancialStatus") not in {"PENDING", "VOIDED"}:
+        # Accept a Shopify manual transaction only for exact generator provenance.
+        try:
+            require_nonfinancial_simulation(order, run_id=run_id)
+        except LifecycleError:
             continue
         lines = order.get("lineItems") or {}
         if (lines.get("pageInfo") or {}).get("hasNextPage"):
@@ -197,10 +193,14 @@ def main():
     policy_path = Path(__file__).resolve().parents[1] / "config/phase4-simulation-policy.json"
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     refund_policy = json.loads((policy_path.parent / "phase5-synthetic-refund-policy.json").read_text(encoding="utf-8"))
-    if (refund_policy["version"] != "phase5-synthetic-refund-policy-v1"
-            or refund_policy["mode"] != "development_store_test_gateway_only"
+    if (refund_policy["version"] != "phase5-synthetic-refund-policy-v2"
+            or refund_policy["mode"] != "development_store_synthetic_manual_or_test_only"
             or refund_policy["currency"] != "GBP"
             or refund_policy["allow_test_transactions"] is not True
+            or refund_policy["allow_verified_synthetic_manual_transactions"] is not True
+            or refund_policy["allowed_synthetic_manual_gateway"] != "manual"
+            or refund_policy["require_generator_note_and_tags"] is not True
+            or refund_policy["block_non_test_transactions"] is not True
             or refund_policy["refund_quantity_per_order"] != 1
             or refund_policy["restock_type"] != "NO_RESTOCK"):
         raise RuntimeError("Unreviewed or unsafe automatic synthetic refund policy")
