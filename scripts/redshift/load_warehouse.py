@@ -215,7 +215,7 @@ def main() -> None:
     ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/landing_schema.sql"
     ddl = [statement.strip() for statement in ddl_path.read_text().split(";") if statement.strip()]
     if not landing_schema_exists(data, workgroup=args.workgroup, database=args.database):
-        ddl.insert(0, 'CREATE SCHEMA "raw"')
+        ddl.insert(0, 'CREATE SCHEMA landing')
     run_data_api(data, workgroup=args.workgroup, database=args.database, statements=ddl)
     for manifest_key, manifest, kind in plans:
         src = (synthetic_statements(args.bucket, args.copy_role_arn, manifest)
@@ -226,9 +226,9 @@ def main() -> None:
         ).hexdigest()
         escaped = manifest_key.replace("'", "''")
         src.append(
-            "INSERT INTO \"raw\".warehouse_load_ledger (load_id,manifest_key,manifest_sha256,source_type) "
+            "INSERT INTO landing.warehouse_load_ledger (load_id,manifest_key,manifest_sha256,source_type) "
             f"SELECT '{manifest_sha}','{escaped}','{manifest_sha}','{kind}' "
-            f"WHERE NOT EXISTS (SELECT 1 FROM \"raw\".warehouse_load_ledger WHERE load_id='{manifest_sha}')"
+            f"WHERE NOT EXISTS (SELECT 1 FROM landing.warehouse_load_ledger WHERE load_id='{manifest_sha}')"
         )
         outcome = run_data_api(data, workgroup=args.workgroup, database=args.database,
                                statements=src)
