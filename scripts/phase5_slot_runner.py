@@ -75,7 +75,7 @@ def run_combined_slot(slot: str, now: datetime, *, apply: bool,
         return code
     lifecycle = str(Path(__file__).with_name("run_phase5_lifecycle.py"))
     code = subprocess.call([sys.executable, lifecycle, "--apply",
-                            "--confirm-apply", "--require-settled"])
+                            "--confirm-apply", "--require-settled", "--limit", "500"])
     if code:
         return code
     run_id = f"live-{now.astimezone(ZoneInfo('Europe/Berlin')):%Y%m%d}-{slot}"
