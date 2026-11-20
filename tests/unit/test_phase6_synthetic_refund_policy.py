@@ -90,3 +90,39 @@ def test_nonfinancial_and_explicit_refund_journals_are_distinct_contracts():
     explicit = Operation("run001", ORDER, "refund", NOW.isoformat(), LINE, 1)
     assert "synthetic_nonfinancial" not in explicit.as_record()
     assert operation().as_record()["synthetic_nonfinancial"] is True
+
+
+def test_scheduled_refund_candidate_is_one_line_and_rejects_paid_orders():
+    from scripts.run_phase5_lifecycle import eligible_synthetic_refunds
+
+    class CandidateShopify:
+        def __init__(self, transactions, status):
+            self.transactions, self.status = transactions, status
+
+        def query(self, document, variables):
+            return {"order": {
+                "id": ORDER, "createdAt": NOW.isoformat(),
+                "cancelledAt": None, "transactions": self.transactions,
+                "displayFinancialStatus": self.status,
+                "lineItems": {"pageInfo": {"hasNextPage": False}, "nodes": [
+                    {"id": LINE, "refundableQuantity": 2},
+                    {"id": "gid://shopify/LineItem/999", "refundableQuantity": 0},
+                ]},
+            }}
+
+    policy = {"seed": 20261118,
+              "cancellation_probability_percent": 0,
+              "cancellation_delay_max_days": 14}
+    refund_policy = {"probability_percent": 100, "max_delay_days": 0}
+    records = [("run001", ORDER)]
+    candidates = list(eligible_synthetic_refunds(
+        CandidateShopify([], "PENDING"), records,
+        now=NOW, policy=policy, refund_policy=refund_policy))
+    assert len(candidates) == 1
+    assert candidates[0].line_item_id == LINE
+    assert candidates[0].quantity == 1
+    assert candidates[0].synthetic_nonfinancial is True
+
+    assert list(eligible_synthetic_refunds(
+        CandidateShopify([{"kind": "SALE", "status": "SUCCESS"}], "PAID"),
+        records, now=NOW, policy=policy, refund_policy=refund_policy)) == []
