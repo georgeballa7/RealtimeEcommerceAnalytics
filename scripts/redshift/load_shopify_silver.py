@@ -257,19 +257,29 @@ def process_published_snapshots(*, s3, data, bucket: str, role_arn: str,
         sql="SELECT nspname FROM pg_namespace WHERE nspname = 'silver_staging'",
     ):
         raise RuntimeError("Expected the existing silver_staging schema")
+    ledger_rows = query(
+        data, workgroup=workgroup, database=database,
+        sql="SELECT manifest_key, manifest_sha256 FROM silver_staging.warehouse_load_ledger "
+            "WHERE source_type = 'shopify_silver'",
+    )
+    ledger = {}
+    for key, digest in ledger_rows:
+        if key in ledger and ledger[key] != digest:
+            raise RuntimeError("Warehouse ledger contains conflicting manifest records")
+        ledger[str(key)] = str(digest)
     latest = latest_silver_load(data, workgroup=workgroup, database=database)
     outcomes = []
-    for key in sorted(manifest_keys):
+    for key in sorted(set(manifest_keys)):
         snapshot = inspect_snapshot(s3, bucket=bucket, manifest_key=key)
-        decision = assert_newer_snapshot(snapshot, latest)
-        if decision == "ALREADY_LOADED":
+        if key in ledger:
+            if ledger[key] != snapshot.digest:
+                raise RuntimeError("Previously loaded Silver manifest changed: " + key)
             outcomes.append({"manifest": key, "status": "ALREADY_LOADED"})
             continue
-        # Older snapshots that already exist in the ledger cannot be reloaded
-        # without rolling the full-snapshot warehouse backwards. Skip them
-        # only after independently checking their exact committed digest.
-        if latest is not None and snapshot.batch_id < latest[0][len(PREFIX):].split("/", 1)[0]:
-            raise RuntimeError("Historical Silver manifest appears after newer warehouse load")
+        if latest is not None:
+            old_batch = latest[0][len(PREFIX):].split("/", 1)[0]
+            if snapshot.batch_id <= old_batch:
+                raise RuntimeError("Refusing out-of-order or duplicate full-state snapshot")
         verify_silver_rows(s3, bucket=bucket, snapshot=snapshot)
         if not apply:
             outcomes.append({"manifest": key, "status": "PENDING", "counts": snapshot.counts})
