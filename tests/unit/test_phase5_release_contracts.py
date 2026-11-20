@@ -96,9 +96,10 @@ def test_phase6_combined_release_reuses_unmodified_projector_and_lifecycle():
     assert "phase5_lifecycle_image = $lifecycleImage" in script
     assert "phase5_generator_image = $newGeneratorImage" in script
     assert "enable_phase6_glue_rds_lease = $true" in script
-    assert "aws_ecs_task_definition.phase5_generator[0]" in script
-    assert 'aws_scheduler_schedule.phase5_generation[\"morning\"]' in script
-    assert 'aws_scheduler_schedule.phase5_generation[\"afternoon\"]' in script
+    guard = (ROOT / "scripts/aws/validate_phase6_release_plan.py").read_text()
+    assert "aws_ecs_task_definition.phase5_generator[0]" in guard
+    assert 'aws_scheduler_schedule.phase5_generation["morning"]' in guard
+    assert 'aws_scheduler_schedule.phase5_generation["afternoon"]' in guard
     assert "validate_phase6_release_plan.py" in script
     assert "Semantic seven-resource release plan validation" in script
     assert "if ($changes.Count -ne 7)" not in script
