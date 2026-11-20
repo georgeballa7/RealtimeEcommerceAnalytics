@@ -1,6 +1,12 @@
 # Phase 5 producer/lifecycle schedules (enabled in the same deployment).
 # Requires the existing phase5_generator.tf resources in the GitHub repository.
 # Generator container uses Dockerfile.phase5-generator and slot runner.
+variable "enable_phase5_legacy_lifecycle_schedule" {
+  description = "Keep the standalone 18:00 cancellation job until BOTH daily combined slots pass end-to-end validation. Turn off in the same reviewed cutover as combined generator/coordinator rollout."
+  type        = bool
+  default     = true
+}
+
 variable "phase5_lifecycle_image" {
   description = "Immutable lifecycle ECS digest; empty prevents lifecycle ECS task and schedule"
   type        = string
@@ -174,7 +180,7 @@ resource "aws_scheduler_schedule" "phase5_generation" {
 }
 
 resource "aws_scheduler_schedule" "phase5_lifecycle" {
-  count = var.phase5_lifecycle_image != "" ? 1 : 0
+  count = var.phase5_lifecycle_image != "" && var.enable_phase5_legacy_lifecycle_schedule ? 1 : 0
   name = "ecommerce-${var.environment}-phase5-lifecycle"
   state = "ENABLED"
   schedule_expression = "cron(0 18 * * ? *)"
