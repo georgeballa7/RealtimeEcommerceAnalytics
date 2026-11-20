@@ -8,13 +8,57 @@ $global:ObservedPlan = $false
 $global:MockUnsafe = $false
 $global:MockScriptRefresh = $false
 $global:MockApplyCalls = 0
+$global:MockLaunch = $false
+$global:MockRdsState = 'stopping'
+$global:MockRdsWaitedForStop = $false
+$global:MockRdsStarted = $false
+$global:MockGlueStarted = $false
 
 function global:aws {
     $global:LASTEXITCODE = 0
     $argv = @($args)
+    if ($global:MockLaunch) {
+        if ($argv.Count -ge 3 -and $argv[0] -eq 'rds') {
+            if ($argv[1] -eq 'wait' -and $argv[2] -eq 'db-instance-stopped') {
+                if ($global:MockRdsState -ne 'stopping') {
+                    throw 'Expected stop transition before RDS waiter'
+                }
+                $global:MockRdsState = 'stopped'
+                $global:MockRdsWaitedForStop = $true
+                return
+            }
+            if ($argv[1] -eq 'start-db-instance') {
+                if ($global:MockRdsState -ne 'stopped') {
+                    throw 'Tried to start RDS before it finished stopping'
+                }
+                $global:MockRdsState = 'starting'
+                $global:MockRdsStarted = $true
+                return 'mock start'
+            }
+            if ($argv[1] -eq 'wait' -and $argv[2] -eq 'db-instance-available') {
+                $global:MockRdsState = 'available'
+                return
+            }
+        }
+        if ($argv[0] -eq 'glue' -and $argv[1] -eq 'get-job-run') {
+            if (-not $global:MockRdsStarted) { throw 'Glue run before RDS restart' }
+            return '{"JobRun":{"JobRunState":"SUCCEEDED"}}'
+        }
+        if ($argv[0] -eq 's3' -and $argv[1] -eq 'cp') {
+            return '{"schema_version":"shopify-live-silver-v1","counts":{"shopify_live_order":{"source":20,"silver":20,"quarantined":0}}}'
+        }
+    }
     $qPos = [array]::IndexOf($argv, '--query')
     if ($qPos -lt 0) { throw ('Unexpected mock AWS command: ' + ($argv -join ' ')) }
     $query = $argv[$qPos + 1]
+    if ($global:MockLaunch -and $query -eq 'DBInstances[0].DBInstanceStatus') {
+        return $global:MockRdsState
+    }
+    if ($global:MockLaunch -and $query -eq 'JobRunId') {
+        if ($global:MockRdsState -ne 'available') { throw 'Glue started while RDS unavailable' }
+        $global:MockGlueStarted = $true
+        return 'jr_mock_123'
+    }
     switch ($query) {
         'Account' { return '825414820081' }
         'Environment.Variables.SHOPIFY_SHOP_DOMAIN' {
@@ -115,3 +159,23 @@ if ($global:MockApplyCalls -ne 1) {
     throw 'Glue script refresh was unexpectedly blocked or applied more than once'
 }
 Write-Host 'Verified: only the Glue script object can update in-place.'
+
+# Full launch path: RDS is 'stopping'. The wrapper must wait for STOPPED,
+# restart the instance, reach AVAILABLE and only then start Glue.
+$global:MockLaunch = $true
+$global:MockRdsState = 'stopping'
+$global:MockScriptRefresh = $true
+function global:Start-Sleep {
+    # Avoid 30-second sleeps during mocked Glue completion.
+}
+& $entry -Launch
+if (-not $global:MockRdsWaitedForStop -or -not $global:MockRdsStarted) {
+    throw 'Stopping-state RDS recovery was not exercised correctly'
+}
+if (-not $global:MockGlueStarted) {
+    throw 'Glue did not launch after RDS reached available state'
+}
+if ($global:MockApplyCalls -ne 2) {
+    throw 'Unexpected number of guarded Terraform apply calls'
+}
+Write-Host 'Verified: stopping -> stopped -> starting -> available -> Glue run -> Silver manifest.'
