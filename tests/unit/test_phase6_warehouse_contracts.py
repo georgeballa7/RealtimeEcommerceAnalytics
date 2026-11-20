@@ -55,7 +55,7 @@ def test_redshift_silver_staging_requires_reviewed_schema_rename():
     assert "Raw RDS snapshots must pass the Glue" in loader
     sources = (ROOT / "analytics/dbt/models/staging/_sources.yml").read_text()
     assert "schema: silver_staging" in sources
-    assert "quoting:\\n      schema: true" in sources
+    assert "quoting:\n      schema: true" in sources
 
 
 def test_analytics_retains_synthetic_label_and_temporal_churn_window():
