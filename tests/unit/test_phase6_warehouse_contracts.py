@@ -42,18 +42,20 @@ def test_historical_loader_never_reconstructs_source_ids_or_fabricates_orders():
     assert "BatchExecuteStatement" in loader or "batch_execute_statement" in loader
 
 
-def test_redshift_raw_schema_bootstrap_is_repeatable():
-    schema_sql = (ROOT / "analytics/redshift/raw_schema.sql").read_text()
+def test_redshift_silver_staging_requires_reviewed_schema_rename():
+    schema_sql = (ROOT / "analytics/redshift/silver_staging_schema.sql").read_text()
     loader = (ROOT / "scripts/redshift/load_warehouse.py").read_text()
-    assert "CREATE SCHEMA IF NOT EXISTS raw" not in schema_sql
-    assert 'CREATE SCHEMA "raw"' in loader
-    assert "pg_namespace WHERE nspname = 'raw'" in loader
-    assert "if not raw_schema_exists" in loader
-    assert 'CREATE TABLE IF NOT EXISTS "raw".synthetic_orders' in schema_sql
-    assert 'CREATE TABLE IF NOT EXISTS raw.' not in schema_sql
-    assert '"raw".synthetic_orders' in loader.replace('\\"', '"')
+    rename = (ROOT / "scripts/redshift/rename_raw_to_silver_staging.py").read_text()
+    assert "CREATE TABLE IF NOT EXISTS silver_staging.synthetic_orders" in schema_sql
+    assert "silver_staging_schema_exists" in loader
+    assert "pg_namespace WHERE nspname = 'silver_staging'" in loader
+    assert "raise RuntimeError" in loader
+    assert 'ALTER SCHEMA \\"raw\\" RENAME TO silver_staging' in rename
+    assert "--apply" in rename
+    assert "Raw RDS snapshots must pass the Glue" in loader
     sources = (ROOT / "analytics/dbt/models/staging/_sources.yml").read_text()
-    assert "quoting:\n      schema: true" in sources
+    assert "schema: silver_staging" in sources
+    assert "quoting:\\n      schema: true" in sources
 
 
 def test_analytics_retains_synthetic_label_and_temporal_churn_window():
