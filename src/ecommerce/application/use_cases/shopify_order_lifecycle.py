@@ -19,6 +19,7 @@ from uuid import uuid5, NAMESPACE_URL
 ORDER_QUERY = """query Phase5Order($id: ID!) {
   order(id: $id) {
     id createdAt cancelledAt currencyCode displayFinancialStatus
+    transactions(first: 20) { id kind status gateway }
     lineItems(first: 100) { pageInfo { hasNextPage } nodes { id quantity refundableQuantity } }
     refunds { id note }
   }
@@ -71,6 +72,41 @@ def cancellation_plan(run_id: str, order_id: str, created_at: datetime,
             "operation_id": stable_key(run_id, order_id, "cancel"),
             "reason": "OTHER"}
 
+def synthetic_refund_plan(run_id: str, order_id: str, created_at: datetime, *,
+                          seed: int, probability_percent: int = 5,
+                          max_delay_days: int = 2) -> dict:
+    """Deterministically select at most one line-item refund per synthetic order.
+
+    This plan only selects a candidate. Shopify order eligibility and whether
+    any payment transaction exists must still be checked before any mutation.
+    """
+    if created_at.tzinfo is None:
+        raise ValueError("Creation timestamp must be timezone-aware")
+    if not 0 <= probability_percent <= 100 or not 0 <= max_delay_days <= 30:
+        raise ValueError("Invalid synthetic refund policy")
+    digest = hashlib.sha256(f"{seed}:{run_id}:{order_id}:refund".encode()).digest()
+    rng = random.Random(int.from_bytes(digest[:8], "big"))
+    selected = rng.randrange(100) < probability_percent
+    delay_minutes = rng.randint(0, max_delay_days * 24 * 60)
+    return {"selected": selected,
+            "due_at": (created_at.astimezone(timezone.utc) +
+                       timedelta(minutes=delay_minutes)).isoformat(),
+            "operation_id": stable_key(run_id, order_id, "refund")}
+
+
+def require_nonfinancial_simulation(order: dict) -> None:
+    """Block automatic Shopify refund if ANY payment transaction is recorded.
+
+    A successful Shopify refund object by itself does not prove a cash transfer.
+    For this safe test path, all existing transactions must be absent; unknown
+    transaction information fails closed rather than authorizing a payment.
+    """
+    transactions = order.get("transactions")
+    if not isinstance(transactions, list) or transactions:
+        raise LifecycleError("Automatic synthetic refund requires verified transactionless order")
+    if order.get("displayFinancialStatus") not in {"PENDING", "VOIDED"}:
+        raise LifecycleError("Automatic synthetic refund requires unpaid/voided financial status")
+
 
 @dataclass(frozen=True)
 class Operation:
@@ -80,6 +116,7 @@ class Operation:
     requested_at: str
     line_item_id: str | None = None
     quantity: int | None = None
+    synthetic_nonfinancial: bool = False
 
     @property
     def key(self):
@@ -89,7 +126,8 @@ class Operation:
         return {"run_id": self.run_id, "order_id": self.order_id,
                 "kind": self.kind, "operation_id": self.key,
                 "requested_at": self.requested_at, "line_item_id": self.line_item_id,
-                "quantity": self.quantity}
+                "quantity": self.quantity,
+                "synthetic_nonfinancial": self.synthetic_nonfinancial}
 
 
 def _snapshot(gql, order_id: str) -> dict:
@@ -186,6 +224,8 @@ def advance(gql, journal, operation: Operation, *, now: datetime,
         journal.put(operation.key, {**record, "state": "complete", "refund_id": existing[0]["id"]})
         return "refunded"
     _refund_line(order, operation.line_item_id, operation.quantity)
+    if operation.synthetic_nonfinancial:
+        require_nonfinancial_simulation(order)
     if not allow_mutations:
         return "preview"
     if record is None:
@@ -204,6 +244,8 @@ def advance(gql, journal, operation: Operation, *, now: datetime,
                "note": marker,
                "refundLineItems": [{"lineItemId": operation.line_item_id,
                                     "quantity": operation.quantity, "restockType": "NO_RESTOCK"}]}
+    if operation.synthetic_nonfinancial:
+        payload["transactions"] = []
     response = _require_no_graphql_errors(
         gql.query(REFUND_MUTATION, {"input": payload, "key": operation.key}, mutation=True),
         "refundCreate", "userErrors")
