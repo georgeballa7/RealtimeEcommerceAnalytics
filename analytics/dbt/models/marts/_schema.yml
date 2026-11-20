@@ -106,6 +106,18 @@ models:
           - relationships:
               to: ref('fct_order_lines')
               field: line_key
+      - name: customer_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: variant_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: variant_key
       - name: cancellation_date_key
         data_tests:
           - not_null
@@ -124,6 +136,18 @@ models:
           - relationships:
               to: ref('fct_orders')
               field: order_key
+      - name: customer_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: variant_key
+        description: "Optional: some operational refunds lack an identifiable original order line."
+        data_tests:
+          - relationships:
+              to: ref('dim_products')
+              field: variant_key
       - name: refund_date_key
         data_tests:
           - not_null
