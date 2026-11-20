@@ -153,10 +153,15 @@ def release(control, owner):
     )
 
 
+def slot_for_time(local):
+    """Which generator slot can advance in the current Berlin local time window?"""
+    return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
+
+
 def handler(event, context):
     now = datetime.now(timezone.utc)
     local = now.astimezone(ZoneInfo("Europe/Berlin"))
-    slot = next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
+    slot = slot_for_time(local)
     if slot is None:
         return log("outside_slot_readiness_windows")
     day_id = SLOT_IDS[slot]
