@@ -44,6 +44,7 @@ def test_daily_policy_is_not_raised_by_one_off_backfill():
 def test_backfill_preview_is_read_only_and_counts_eligible(monkeypatch, capsys):
     """A read-only preview should not require --apply or contact live AWS."""
     import boto3
+    from ecommerce.application.use_cases.shopify_order_lifecycle import Operation
 
     monkeypatch.setenv("SHOPIFY_SHOP_DOMAIN", "realtime-ecommerce-analytics.myshopify.com")
     monkeypatch.setenv("SHOPIFY_CLIENT_ID", "local-preview-only")
@@ -74,7 +75,11 @@ def test_backfill_preview_is_read_only_and_counts_eligible(monkeypatch, capsys):
                             AssertionError("Backfill must not select cancellations")))
     monkeypatch.setattr(run_phase5_lifecycle, "eligible_synthetic_refunds",
                         lambda *args, **kwargs: iter([
-                            "sample-refund-operation"
+                            Operation("live-20261120-afternoon",
+                                      "gid://shopify/Order/123", "refund",
+                                      "2026-11-20T20:00:00+00:00",
+                                      "gid://shopify/LineItem/456", 1,
+                                      synthetic_nonfinancial=True)
                         ]))
     monkeypatch.setattr(run_phase5_lifecycle, "advance",
                         lambda *args, **kwargs: (_ for _ in ()).throw(
