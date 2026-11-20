@@ -65,20 +65,24 @@ $projectorImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "
 
 # Preserve the existing warehouse and all deployed Phase 5 inputs; otherwise
 # Terraform defaults can plan destruction of operational resources.
+# Windows PowerShell 5.1 can split -var=key=value at native-process boundaries.
+# Use Terraform's two-argument -var KEY=VALUE form instead, preserving each
+# var assignment as one distinct native argument.
 $tfvars = @(
-    "-var=aws_account_id=$ExpectedAccount",
-    "-var=aws_profile=$ProfileName",
-    "-var=aws_region=$Region",
-    "-var=shopify_shop_domain=$domain",
-    "-var=shopify_client_credentials_secret_arn=$secretArn",
-    "-var=shopify_webhook_secret_arn=$secretArn",
-    "-var=phase5_lambda_image=$lambdaImage",
-    "-var=phase5_generator_image=$generatorImage",
-    "-var=phase5_projector_image=$projectorImage",
-    "-var=phase5_lifecycle_image=$lifecycleImage",
-    "-var=enable_redshift_warehouse=true",
-    "-var=enable_phase6_glue_silver=true"
+    "-var", "aws_account_id=$ExpectedAccount",
+    "-var", "aws_profile=$ProfileName",
+    "-var", "aws_region=$Region",
+    "-var", "shopify_shop_domain=$domain",
+    "-var", "shopify_client_credentials_secret_arn=$secretArn",
+    "-var", "shopify_webhook_secret_arn=$secretArn",
+    "-var", "phase5_lambda_image=$lambdaImage",
+    "-var", "phase5_generator_image=$generatorImage",
+    "-var", "phase5_projector_image=$projectorImage",
+    "-var", "phase5_lifecycle_image=$lifecycleImage",
+    "-var", "enable_redshift_warehouse=true",
+    "-var", "enable_phase6_glue_silver=true"
 )
+
 Push-Location $TerraformDir
 try {
     & terraform init -input=false
@@ -87,7 +91,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "terraform fmt check failed" }
     & terraform validate
     if ($LASTEXITCODE -ne 0) { throw "terraform validate failed" }
-    & terraform plan @tfvars -out=phase6-glue-reviewed.tfplan
+    & terraform plan -input=false -out=phase6-glue-reviewed.tfplan @tfvars
     if ($LASTEXITCODE -ne 0) { throw "terraform plan failed" }
 
     $planJson = (& terraform show -json .\phase6-glue-reviewed.tfplan | Out-String)
