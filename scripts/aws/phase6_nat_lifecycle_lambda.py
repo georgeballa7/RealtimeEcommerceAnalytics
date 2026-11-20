@@ -23,7 +23,7 @@ from botocore.exceptions import ClientError
 TAG_VALUE = "phase6-dynamic-nat"
 BERLIN = ZoneInfo("Europe/Berlin")
 GLUE_ACTIVE = {"STARTING", "RUNNING", "STOPPING", "WAITING"}
-TERMINAL_PHASES = {"dispatched", "failed"}
+TERMINAL_PHASES = {"dispatched", "completed", "failed", "warehouse_failed"}
 LOCK_ID = "phase6-nat-lifecycle-lock"
 LEASE_SECONDS = 90
 QUIET_SECONDS = 20 * 60
