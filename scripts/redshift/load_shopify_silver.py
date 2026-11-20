@@ -342,7 +342,8 @@ def lambda_handler(event, context):
     finally:
         table.delete_item(
             Key={"id": "phase6-redshift-loader"},
-            ConditionExpression="owner=:owner",
+            ConditionExpression="#owner=:owner",
+            ExpressionAttributeNames={"#owner": "owner"},
             ExpressionAttributeValues={":owner": owner},
         )
 
