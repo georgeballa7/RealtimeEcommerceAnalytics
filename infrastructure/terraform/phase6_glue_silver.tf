@@ -71,7 +71,8 @@ resource "aws_iam_role_policy" "phase6_glue_data" {
         Action   = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
         Resource = [
           "${aws_s3_bucket.landing.arn}/warehouse/shopify_snapshots/v1/*",
-          "${aws_s3_bucket.landing.arn}/glue/phase6_shopify_silver.py"
+          "${aws_s3_bucket.landing.arn}/glue/phase6_shopify_silver.py",
+          "${aws_s3_bucket.landing.arn}/glue/tmp/*"
         ]
       },
       {
@@ -81,7 +82,8 @@ resource "aws_iam_role_policy" "phase6_glue_data" {
         Condition = {
           StringLike = { "s3:prefix" = [
             "warehouse/shopify_snapshots/v1/*",
-            "glue/phase6_shopify_silver.py"
+            "glue/phase6_shopify_silver.py",
+            "glue/tmp/*"
           ] }
         }
       },
