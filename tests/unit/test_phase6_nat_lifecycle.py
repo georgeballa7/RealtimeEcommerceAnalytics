@@ -104,7 +104,7 @@ def test_nat_will_not_delete_when_projector_or_error_hold_exists():
     clients = {"ecs": Mock(), "sqs": Mock(), "ddb": Mock(), "glue": Mock()}
     settings = {"ECS_CLUSTER": "ecommerce-demo", "EVENT_QUEUE_URL": "queue",
                 "EVENTS_TABLE": "events", "GLUE_JOB_NAME": "job"}
-    local = datetime(2026, 11, 21, 19, 0, tzinfo=BERLIN)
+    local = datetime(2026, 11, 21, 22, 30, tzinfo=BERLIN)
     assert mod.inactive_workloads(
         clients, settings, {"worker_task_arn": "ecs/active"}, local, "afternoon"
     ) == "projector_not_idle"
