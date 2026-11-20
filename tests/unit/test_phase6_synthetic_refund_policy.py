@@ -63,8 +63,8 @@ def test_deterministic_plan_and_bounds():
 
 
 @pytest.mark.parametrize("transactions,status", [
-    ([{"id": "gid://shopify/OrderTransaction/1", "status": "SUCCESS"}], "PAID"),
-    ([{"id": "gid://shopify/OrderTransaction/1", "status": "PENDING"}], "PENDING"),
+    ([{"id": "gid://shopify/OrderTransaction/1", "status": "SUCCESS", "test": False}], "PAID"),
+    ([{"id": "gid://shopify/OrderTransaction/1", "status": "PENDING", "test": False}], "PENDING"),
     ([], "PAID"),
 ])
 def test_no_real_payment_refund(transactions, status):
@@ -124,5 +124,35 @@ def test_scheduled_refund_candidate_is_one_line_and_rejects_paid_orders():
     assert candidates[0].synthetic_nonfinancial is True
 
     assert list(eligible_synthetic_refunds(
-        CandidateShopify([{"kind": "SALE", "status": "SUCCESS"}], "PAID"),
+        CandidateShopify([{"kind": "SALE", "status": "SUCCESS", "test": False}], "PAID"),
         records, now=NOW, policy=policy, refund_policy=refund_policy)) == []
+
+
+def test_dev_shop_test_gateway_payment_is_simulated_not_real():
+    client = Shopify(
+        transactions=[{"id": "gid://shopify/OrderTransaction/1",
+                       "kind": "SALE", "status": "SUCCESS", "test": True}],
+        status="PAID")
+    journal = Journal()
+    assert advance(client, journal, operation(), now=NOW, allow_mutations=True) == "refunded"
+    assert client.mutations[0]["input"]["transactions"] == []
+    assert journal.data[operation().key]["state"] == "complete"
+
+
+def test_sandbox_refund_candidate_accepts_test_payment():
+    from scripts.run_phase5_lifecycle import eligible_synthetic_refunds
+
+    class TestGateway:
+        def query(self, document, variables):
+            return {"order": {
+                "id": ORDER, "createdAt": NOW.isoformat(), "cancelledAt": None,
+                "transactions": [{"test": True, "kind": "SALE", "status": "SUCCESS"}],
+                "displayFinancialStatus": "PAID",
+                "lineItems": {"pageInfo": {"hasNextPage": False}, "nodes": [
+                    {"id": LINE, "refundableQuantity": 1}]},
+            }}
+    policy = {"seed": 20261118, "cancellation_probability_percent": 0,
+              "cancellation_delay_max_days": 14}
+    rp = {"probability_percent": 100, "max_delay_days": 0}
+    assert len(list(eligible_synthetic_refunds(TestGateway(), [("run001", ORDER)],
+                      now=NOW, policy=policy, refund_policy=rp))) == 1
