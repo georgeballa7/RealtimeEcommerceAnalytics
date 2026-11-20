@@ -43,6 +43,7 @@ resource "aws_iam_role_policy" "redshift_s3_copy" {
         Resource = [
           "${aws_s3_bucket.landing.arn}/historical/online_retail_ii/synthetic/v1/intervals/*",
           "${aws_s3_bucket.landing.arn}/warehouse/live_exports/v1/*",
+          "${aws_s3_bucket.landing.arn}/warehouse/shopify_snapshots/v1/*",
         ]
       },
       {
@@ -54,6 +55,7 @@ resource "aws_iam_role_policy" "redshift_s3_copy" {
             "s3:prefix" = [
               "historical/online_retail_ii/synthetic/v1/intervals/*",
               "warehouse/live_exports/v1/*",
+              "warehouse/shopify_snapshots/v1/*",
             ]
           }
         }
