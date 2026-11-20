@@ -253,7 +253,7 @@ resource "aws_lambda_function" "phase5_controller" {
   timeout = 40 # Controller lease lasts 50s; invocation must finish before lease expiration
   memory_size = 256
   image_config { command = ["ecommerce.interfaces.workers.phase5_rds_controller_lambda.handler"] }
-  environment { variables = {
+  environment { variables = merge({
     PENDING_EVENTS_TABLE = aws_dynamodb_table.phase5_events.name,
     CONTROLLER_TABLE = aws_dynamodb_table.phase5_controller.name,
     DB_INSTANCE_IDENTIFIER = aws_db_instance.ecommerce.identifier,
@@ -263,7 +263,9 @@ resource "aws_lambda_function" "phase5_controller" {
     PROJECTOR_SECURITY_GROUPS = aws_security_group.ecs.id,
     RDS_IDLE_MINUTES = "30",
     ALLOW_AUTOMATIC_RDS_STOP = "true" # 30-minute idle shutdown with lock, backlog and ECS guards
-  } }
+  }, var.enable_phase6_glue_rds_lease ? {
+    PHASE6_GLUE_JOB_NAME = aws_glue_job.phase6_shopify_silver[0].name
+  } : {}) }
 }
 resource "aws_cloudwatch_event_rule" "phase5_reconcile" {
   count = local.phase5_live_ready ? 1 : 0
