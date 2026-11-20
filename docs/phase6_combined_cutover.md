@@ -1,56 +1,51 @@
-# Phase 6 coordinated Shopify simulation → Glue → Redshift release
+# Phase 6 — Shopify development-store 22:00 lifecycle and Redshift cutover
 
-Status: code staged on `feature/redshift-warehouse-dbt-churn`; **not deployed by this document**. All clock times Europe/Berlin. AWS eu-central-1, account 825414820081. Never use a manual Terraform apply without restoring the pinned Phase 5 image variables from deployed state and reviewing the plan.
+Status (20 November 2026): **schedule changed in live AWS; updated ECS/Lambda code remains on feature branch until a reviewed release**. Branch: `feature/redshift-warehouse-dbt-churn`. Region: `eu-central-1`. Timezone: `Europe/Berlin`.
 
-## Live AWS inventory verified 20 November 2026
+## Confirmed daily business schedule
 
-| Resource | Observed live state |
-| --- | --- |
-| Shopify generation 08:00 | EventBridge `ecommerce-demo-phase5-morning` ENABLED, ECS generator `:5` |
-| Shopify generation 16:00 | EventBridge `ecommerce-demo-phase5-afternoon` ENABLED, ECS generator `:5` |
-| Legacy lifecycle 18:00 | `ecommerce-demo-phase5-lifecycle` ENABLED, ECS lifecycle `:2`; do not remove prematurely |
-| Glue readiness poll | `ecommerce-phase6-evening-glue-demo` ENABLED, `cron(0/5 16-21 * * ? *)` Berlin (morning coverage not yet deployed) |
-| Glue PySpark job | `ecommerce-phase6-shopify-silver-demo` deployed; 2 successful manual/afternoon runs documented |
-| Redshift Silver loader | `ecommerce-phase6-silver-redshift-loader-demo` deployed ZIP; new completion acknowledgment not yet deployed |
-| Redshift Serverless | `ecommerce-analytics-demo` AVAILABLE, base 4 RPU; daily 8 RPU-hour logging and monthly 16 RPU-hour deactivation |
-| RDS | `ecommerce-postgres-dev` db.t4g.micro; observed stopped |
-| NAT | one **static** Terraform-owned gateway; both private application subnets use its default route |
-| Controller | DynamoDB `ecommerce-demo-phase5-controller` has `phase6-evening` batch `20261120T161030Z` with Glue SUCCEEDED / `dispatched` (not terminal warehouse acknowledgment) |
+- 08:00: Shopify development-store order generator (100 orders).
+- 16:00: Shopify development-store order generator (150 orders).
+- 22:00: standalone cancellation and simulated refund lifecycle (including previously created orders due today).
+- After 22:00: webhook delivery → SQS → RDS projector; only after completion and a quiet window → Glue PySpark JDBC → S3 Bronze/validated Silver → manifest → Redshift Silver staging and load ledger.
+- Morning Glue snapshot remains optional for early order analytics; **the nightly snapshot is the authoritative end-of-day lifecycle-aware state**. Morning snapshots must not be presented as final daily refund-inclusive revenue.
 
-Source of truth for the *next* deployment is a fresh live AWS inventory and the reviewed Terraform plan, not this snapshot.
+AWS Scheduler `ecommerce-demo-phase5-lifecycle` was verified updated directly from `cron(0 18 * * ? *)` to `cron(0 22 * * ? *)`, while its existing target and ENABLED state were preserved. The Terraform schedule is now aligned to 22:00. **The new lifecycle image has not been released to ECS yet**; the existing image still handles the deployed schedule until release.
 
-## Required readiness contracts
+## Commit contracts
 
-1. Existing ECS generator schedule starts one combined task: deterministically generate approved synthetic Shopify orders, then evaluate eligible cancellations and transactionless synthetic refunds from the journal. A successful task writes `simulation/phase5/slots/v1/live-YYYYMMDD-{morning|afternoon}.json` **last**.
-2. All synthetic refunds are distinct from cancellation. Policy `config/phase5-synthetic-refund-policy.json` selects 5% of non-cancellation orders, one item quantity, delayed 0–2 days; only orders with no Shopify payment transactions and `PENDING`/`VOIDED` financial state may receive automated `refundCreate` with empty transactions and no restock. No real-money refund may be automatically initiated. An ineligible order is skipped, not falsely reported as refunded. Shopify's live API may reject transactionless refunds; do not claim success without a development-store smoke.
-3. Coordinator refuses Glue until the *matching* S3 combined-slot marker exists and the webhook event index, SQS, ECS tasks and projector are quiescent. A marker is necessary but not by itself proof every possible delayed webhook arrived: verify expected event identities and reconciliation during release.
-4. Glue extracts full RDS table state through JDBC, validates Silver and commits immutable manifest last. Current per-table JDBC reads are not a transaction-wide snapshot. Do not allow concurrent projector writes during extraction.
-5. Redshift loader must reconcile manifest, commit staging plus ledger, and acknowledge matching DynamoDB slot `completed`. An asynchronous Lambda 202 is only `dispatched`, not completed.
-6. RDS controller Glue lease must protect database startup/stop over Glue execution. Coordinator's own lease has a 45-minute TTL; review recovery path for abandoned Glue runs and no premature stop. NAT removal is allowed only once all network-dependent work is idle.
-7. Never classify simulated cancellations or Shopify refund line subtotals as settled cash reimbursements.
+1. **Generation:** `scripts/phase5_slot_runner.py` writes `simulation/phase5/slots/v1/live-YYYYMMDD-{morning|afternoon}.json` only after a successful applied run. No refunds or cancellations execute in the generator.
+2. **Nightly:** `scripts/run_phase5_lifecycle.py --apply --confirm-apply --require-settled --commit-nightly --limit 500` scans eligible generation journals (16-day lookback), deterministically selects 10% cancellations plus 5% refund candidates (0–2-day delay), operates on Shopify and waits for asynchronous cancellations to settle. Then verifies both today's generation markers and writes `simulation/phase5/slots/v1/lifecycle-YYYY-MM-DD.json`. Failure or unsettled actions must leave marker absent.
+3. **Refund policy:** `config/phase5-synthetic-refund-policy.json`, version `phase5-synthetic-refund-policy-v1`, explicitly targets the configured development store. Eligible candidates are unpaid/voided transactionless orders, or orders where **every listed payment transaction is marked `test=true`** by Shopify. Any non-test/unknown payment transaction is excluded. One refundable line and one unit maximum per selected order. The `refundCreate` request uses stable Shopify `@idempotent` key, `transactions: []`, `NO_RESTOCK`, and no customer notification. Shopify may reject an ineligible order; log and reconcile; never present a simulated refund as verified cash settlement.
+4. **Webhook projection:** Shopify `REFUNDS_CREATE` is already part of registered topics; projection persists `shopify_live_refund` and `shopify_live_refund_line` in RDS under its idempotent event ledger, after SQS landing. Shopify order update/cancellation webhook records remain independent from refund line records.
+5. **Glue barrier:** revised `phase6_evening_coordinator.py` polls at `cron(0/5 0-2,8-15,22-23 * * ? *)` Berlin. The night slot checks today's 08:00 + 16:00 order-generation markers and 22:00 lifecycle marker, then checks RDS controller readiness and SQS/worker quietness. 00:00–02:59 Berlin belongs to **previous day's nightly slot**. Night Glue must not start before the lifecycle marker exists. A quiet queue by itself is not a run completion certificate.
+6. **Glue/Redshift:** Glue checks row-level quality and source/Silver reconciliation and commits its Silver manifest last. Redshift must load a matching committed manifest, verify row counts, transactionally update its Silver staging and load ledger, and acknowledge `phase=completed` in DynamoDB. Do not confuse coordinator `dispatched` with Redshift `completed`. dbt `fct_refund_lines` models line-item subtotals with financial_semantics `not_payment_settlement`, separate from cancellations.
+7. **NAT:** if on-demand NAT is deployed in a *separate reviewed cutover*, the 16:00 window must remain network-accessible for 22:00 Shopify operations and post-midnight projection. This costs more NAT runtime than two short windows. Implement a split 16:00/22:00 prewarm if cost optimization is prioritized; **the on-demand NAT code should not be enabled without its midnight lease/route regression review**.
 
-## Guarded staged cutover, in this order
+## Verified AWS state before image rollout
 
-- [ ] **Preflight:** Read AWS schedules/target ECS revisions, Lambda SHA/roles, RDS/Glue/NAT/Redshift states and DynamoDB; ensure current daily runs are idle and write no pending; review Shopify webhook subscription including `REFUNDS_CREATE`, verify mock shop and API permissions.
-- [ ] **Verify CI:** Python CI, Glue PySpark, Terraform validate, dbt offline, and PowerShell syntax pass on **the exact current commit**. Review changes and Terraform plan with `enable_phase5_legacy_lifecycle_schedule=true`, `nat_gateway_mode=static`; do not inadvertently destroy existing Redshift, RDS, ECR, ECS, schedules, S3 or IAM.
-- [ ] **Stage IAM & images:** Apply only reviewed IAM/S3 access for combined ECS generator lifecycle journal + marker, existing Glue coordinator marker read, and Redshift loader DynamoDB acknowledgments. Build/push fresh digest-pinned generator container (including lifecycle and policy), update scheduled ECS task definition atomically through reviewed Terraform. Phase5 controller Glue-aware image/lease must be deployed and verified as part of the existing guarded `scripts/aws/deploy_phase6_rds_controller.ps1` release if not already present. Do not change 18:00 yet.
-- [ ] **Deploy loader ZIP:** Validate `scripts/aws/deploy_phase6_silver_loader.ps1` with no `-Apply`, review IAM simulation, then use `-Apply`. Verify code hash and handler. No automatic replay until coordinator is ready.
-- [ ] **Deploy coordinator ZIP:** Validate then apply `scripts/aws/deploy_phase6_evening_coordinator.ps1`. Confirm readiness schedule becomes `cron(0/5 8-21 * * ? *)` Berlin (not another generator schedule); verify Lambda zip hash and S3 marker permissions.
-- [ ] **Morning/afternoon acceptance:** Observe an **entire** morning and afternoon combined slot: exactly requested order count, completed task, cancellation/refund journal outcomes, S3 slot markers, successful webhook projector, no pending indexed events or SQS backlog, Glue SUCCEEDED and manifest rows reconciled, Redshift transactional load ledger with matching manifest, coordinator DynamoDB `phase=completed`. A refund-selection outcome is not a Shopify-accepted refund; verify actual Shopify `refunds/create` delivery, RDS `shopify_live_refund`/`refund_line`, S3 Silver and Redshift rows. Test one harmless eligible refund in a controlled preview/smoke; if no eligible transactionless Shopify order exists, keep auto refund disabled until safe simulation approach is verified.
-- [ ] **Failure testing:** Simulate missing marker, generator failure, unsettled cancellation, deferred/replayed/refused refund, missed webhook, Glue failure and loader timeout. Verify no double creation/refund and no false `completed` state; inspect expired DynamoDB leases and use manual reconciliation rather than unsafe clearing.
-- [ ] **Retire 18:00:** After both daily workflows have passed, reviewed Terraform apply `enable_phase5_legacy_lifecycle_schedule=false`; verify actual EventBridge resource removed and no independent cancellation batch. Preserve ECS task definition/image until rollback window expires.
-- [ ] **On-demand NAT optional separate cutover:** Review `nat_gateway_mode=on_demand` Terraform plan, EIP/route ownership and 07:30/15:30 prewarm. Confirm S3 endpoint access and ECS ECR/CloudWatch/secrets readiness, ensure no 18:00 need, then migrate only during an idle window. The NAT Lambda must never delete Terraform-owned static gateway directly. Validate routing prewarm and deletion safety on both windows and monitor spending.
-- [ ] **dbt/ML readiness separately:** prepare analytics staging/marts schemas and IAM, publish pinned dbt runner image, run `dbt build` / full data tests; verify source identities and point-in-time churn features before MLflow training/scoring. Do not claim Gold/MLflow production ready from offline parser validation alone.
+- ECS generator revision `:5`, lifecycle revision `:2` (both existing images), morning/afternoon schedules ENABLED.
+- 22:00 lifecycle schedule ENABLED and target preserved; no current AWS ECS image contains this feature branch's newest refund policy until new digest is built and applied.
+- Glue job `ecommerce-phase6-shopify-silver-demo` deployed; two SUCCEEDED jobs observed on November 20.
+- Redshift Serverless `ecommerce-analytics-demo` AVAILABLE; daily 8 RPU-hour log and monthly 16 RPU-hour deactivate limits.
+- RDS `ecommerce-postgres-dev` observed stopped; static Terraform-managed NAT gateway observed available.
+- Phase 6 readiness Lambda still deployed at earlier 16–21 poll; deploy revised ZIP *after* generator/lifecycle images are correctly scheduled, otherwise marker gating blocks all old tasks.
+- Audit query identity received `permission denied for schema silver_staging`; inspect role grants separately, not by relaxing the source-to-Silver checks.
 
-## Operator safeguards and rollback
+## Reviewed deployment sequence
 
-* Current schedule and Lambda versions stay unchanged until a reviewed deployment actually executes. A merged branch does **not** update ECS/Glue/Lambda by itself.
-* New S3 marker is backwards-incompatible with old producer. Update producer IAM/image **before** deploying coordinator; keep old 18:00 schedule until verified end-to-end run.
-* Rollback to old coordinator only after checking in-flight Glue and loader statuses. Retain 18:00 while testing. Rolling back the producer without rolling back marker-required coordinator would halt the analytics pipeline.
-* Restore Terraform-controlled static NAT only via reviewed Terraform plan after all dynamic NAT routes and owned gateways are reconciled. Never destroy a NAT gateway while a Shopify/ECS workload depends on it.
-* The daily 8 RPU-hour threshold logs; only monthly 16 RPU-hours deactivates compute. Neither represents a total AWS budget cap.
-* Avoid repeated Shopify mutations to probe readiness. Preview/dry-run first; exact journals and manifest IDs make reruns idempotent, but an ambiguous Shopify refund must fail closed and be manually reconciled.
+- [ ] Confirm all 5 CI workflows pass on the **exact final branch SHA**, including nightly marker, temporal rollover, and Shopify refund policy regressions.
+- [ ] On the Windows checkout, confirm current branch and clean worktree. Run the reviewed `scripts/aws/deploy_phase6_rds_controller.ps1` in default plan-only mode, with AWS profile `ecommerce-admin`. It builds/pushes immutable Lambda, generator and lifecycle images, pins existing projector and other variables, checks actual 22:00 schedule, and previews Terraform. Inspect all IAM/ECS/Scheduler changes; no deletion of RDS/Redshift/VPC resources or NAT cutover.
+- [ ] After reviewed Terraform plan, run `scripts/aws/deploy_phase6_rds_controller.ps1 -Apply` with exact approval string; verify new lifecycle and generator digests in EventBridge schedule targets and controller Glue/RDS lease support. Confirm no other schedules changed.
+- [ ] Deploy updated Redshift loader after its IAM preflight using `scripts/aws/deploy_phase6_silver_loader.ps1`; validate dry-run then `-Apply`. Check version SHA and DynamoDB write acknowledgment.
+- [ ] Deploy updated readiness coordinator via `scripts/aws/deploy_phase6_evening_coordinator.ps1`; first validate ZIP, then verify new `0-2,8-15,22-23` cadence, IAM S3 marker read and DynamoDB transitions.
+- [ ] Verify 22:00 Shopify lifecycle in actual dev shop: selected test-gateway refunds (and non-test exclusion), operation journal idempotency, `refunds/create` and `orders/updated`, RDS refund rows and refund-line subtotals, S3 Bronze/validated Silver, Redshift load ledger and `fct_refund_lines`. Prove delayed Shopify webhooks are processed or deferred to the next batch and never silently lost.
+- [ ] Manually test failure paths (missing marker, Shopify mutation error, asynchronous cancellation unresolved, RDS unavailable, Glue failure, delayed webhooks, Redshift loader 202 but no acknowledgment, night across midnight).
+- [ ] Validate dbt build and warehouse access grants; actual churn training and MLflow are separate release gates.
+- [ ] Migrate static NAT to on-demand only with an explicit idle-window Terraform plan, then verify 16:00 and 22:00 network continuity and costs.
 
-## Core review files
+## Rollback
 
-`scripts/phase5_slot_runner.py`; `scripts/run_phase5_lifecycle.py`; `src/ecommerce/application/use_cases/shopify_order_lifecycle.py`; `scripts/aws/phase6_evening_coordinator.py`; `scripts/redshift/load_shopify_silver.py`; `scripts/aws/phase6_nat_lifecycle_lambda.py`; `infrastructure/terraform/phase5_generator.tf`; `infrastructure/terraform/phase5_scheduled_lifecycle.tf`; `infrastructure/terraform/phase6_glue_silver.tf`; `infrastructure/terraform/phase6_nat_on_demand.tf`; `scripts/aws/deploy_phase6_silver_loader.ps1`; `tests/unit/test_phase6_synthetic_refund_policy.py`.
+Terraform state remains authoritative for images/schedules, except the already performed live EventBridge 22:00 timing change which is reflected in branch Terraform. The older ECS images remain available for digest rollback. Do not revert coordinator while an active Glue lease/loader is running, and do not invoke an unreviewed old producer after deploying marker-gated coordinator. If the 22:00 Shopify lifecycle fails, mark night uncommitted and preserve source/webhook evidence for safe reconciliation rather than publishing a misleading Redshift snapshot.
+
+This document supersedes the previous 18:00 retirement and twice-daily combined-generation proposal; those earlier assumptions no longer reflect the user's requested operating schedule.
