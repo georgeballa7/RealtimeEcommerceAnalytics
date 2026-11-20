@@ -1,4 +1,4 @@
--- Warehouse landing schema: source-shaped staging; not an assertion of Silver validation.
+-- Warehouse landing schema: source-shaped staging, not an assertion of Silver validation.
 -- The loader creates the landing schema after checking pg_namespace.
 
 CREATE TABLE IF NOT EXISTS landing.synthetic_orders (
