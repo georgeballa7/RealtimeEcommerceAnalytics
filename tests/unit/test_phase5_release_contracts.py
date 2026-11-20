@@ -86,3 +86,26 @@ def test_shopify_draft_order_create_does_not_query_nonexistent_usererror_code():
     assert 'draftOrderCreate(input: $input)' in create
     assert 'userErrors { field message }' in create
     assert 'userErrors { code' not in create
+
+
+def test_phase6_combined_release_reuses_unmodified_projector_and_lifecycle():
+    script = (ROOT / "scripts/aws/deploy_phase6_rds_controller.ps1").read_text()
+    assert "Dockerfile.phase5-lambda" in script
+    assert "Dockerfile.phase5-generator" in script
+    assert "phase5_projector_image = $projectorImage" in script
+    assert "phase5_lifecycle_image = $lifecycleImage" in script
+    assert "phase5_generator_image = $newGeneratorImage" in script
+    assert "enable_phase6_glue_rds_lease = $true" in script
+    assert "aws_ecs_task_definition.phase5_generator[0]" in script
+    assert 'aws_scheduler_schedule.phase5_generation[\"morning\"]' in script
+    assert 'aws_scheduler_schedule.phase5_generation[\"afternoon\"]' in script
+    assert "if ($changes.Count -ne 7)" in script
+    assert "if (-not $Apply)" in script
+    assert "DEPLOY-GLUE-LEASE" in script
+
+
+def test_phase6_combined_release_preserves_scheduled_clock_times():
+    lifecycle = (ROOT / "infrastructure/terraform/phase5_scheduled_lifecycle.tf").read_text()
+    assert 'morning = { cron = "cron(0 8 * * ? *)", count = 100 }' in lifecycle
+    assert 'afternoon = { cron = "cron(0 16 * * ? *)", count = 150 }' in lifecycle
+    assert 'schedule_expression_timezone = "Europe/Berlin"' in lifecycle
