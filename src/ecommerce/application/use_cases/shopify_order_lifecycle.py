@@ -154,7 +154,7 @@ def require_nonfinancial_simulation(order: dict, *, run_id: str | None = None) -
     if all(isinstance(tx, dict) and tx.get("test") is True for tx in transactions):
         return
     if not run_id or not _is_verified_synthetic_order(order, run_id):
-        raise LifecycleError("Non-test payment requires exact synthetic order provenance")
+        raise LifecycleError("Automatic synthetic refund requires exact generator provenance for manual payments")
     if order.get("displayFinancialStatus") != "PAID" or any(
         not isinstance(tx, dict)
         or tx.get("gateway") != "manual"
