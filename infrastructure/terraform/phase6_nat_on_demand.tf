@@ -124,6 +124,7 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
       EVENT_QUEUE_URL              = aws_sqs_queue.events.url
       ECS_CLUSTER                  = aws_ecs_cluster.ecommerce.name
       GLUE_JOB_NAME                = "ecommerce-phase6-shopify-silver-${var.environment}"
+      PHASE5_LEGACY_LIFECYCLE_ENABLED = tostring(var.enable_phase5_legacy_lifecycle_schedule)
     }
   }
 
@@ -142,7 +143,8 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
 }
 
 # This is a NETWORK readiness tick; NOT a Shopify order generation schedule.
-# Existing 08:00/16:00 ECS and 18:00 lifecycle schedules are unchanged.
+# Existing 08:00/16:00 schedules remain; standalone 18:00 is controlled by
+# enable_phase5_legacy_lifecycle_schedule and disabled only at verified cutover.
 resource "aws_iam_role" "phase6_nat_schedule" {
   count = var.nat_gateway_mode == "on_demand" ? 1 : 0
   name  = "ecommerce-phase6-nat-scheduler-${var.environment}"
