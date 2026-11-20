@@ -300,6 +300,52 @@ def process_published_snapshots(*, s3, data, bucket: str, role_arn: str,
     return outcomes
 
 
+
+def acknowledge_verified_slot(table, event: dict, outcomes: list[dict]) -> bool:
+    """Only committed or previously loaded Silver can finish a pipeline slot."""
+    if not isinstance(event, dict) or event.get("source") not in {
+            "phase6-morning", "phase6-afternoon"}:
+        return False
+    slot_id = ("phase6-morning" if event["source"] == "phase6-morning"
+               else "phase6-evening")
+    batch = event.get("batch_id")
+    run_id = event.get("run_id")
+    if not isinstance(batch, str) or not VALID_BATCH.fullmatch(batch):
+        raise ValueError("Missing or invalid expected coordinator batch")
+    if not isinstance(run_id, str) or not run_id.startswith("jr_"):
+        raise ValueError("Missing or invalid expected Glue run identifier")
+    manifest = PREFIX + batch + "/silver_manifest.json"
+    matched = [row for row in outcomes if row.get("manifest") == manifest
+               and row.get("status") in {"LOADED", "ALREADY_LOADED"}]
+    if len(matched) != 1:
+        raise RuntimeError("Expected slot Silver manifest not committed in Redshift")
+    previous = table.get_item(Key={"id": slot_id}, ConsistentRead=True).get("Item", {})
+    if previous.get("run_id") != run_id or previous.get("batch_id") != batch:
+        raise RuntimeError("Redshift completion does not match coordinator slot")
+    if previous.get("phase") == "completed":
+        return True
+    if previous.get("phase") != "dispatched":
+        raise RuntimeError("Redshift slot not ready for completion acknowledgement")
+    try:
+        table.update_item(
+            Key={"id": slot_id},
+            UpdateExpression="SET #phase=:complete, warehouse_verified_at=:time",
+            ConditionExpression="#phase=:dispatched AND run_id=:run AND batch_id=:batch",
+            ExpressionAttributeNames={"#phase": "phase"},
+            ExpressionAttributeValues={
+                ":complete": "completed", ":dispatched": "dispatched",
+                ":run": run_id, ":batch": batch, ":time": int(time.time())},
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            current = table.get_item(Key={"id": slot_id}, ConsistentRead=True).get("Item", {})
+            if (current.get("phase") == "completed" and
+                    current.get("run_id") == run_id and current.get("batch_id") == batch):
+                return True
+        raise
+    return True
+
+
 def lambda_handler(event, context):
     """Invoked after a successful Glue job; catch up all unpublished warehouse batches."""
     bucket = os.environ["SILVER_BUCKET"]
@@ -335,6 +381,8 @@ def lambda_handler(event, context):
             s3=s3, data=data, bucket=bucket, role_arn=role_arn,
             workgroup=workgroup, database=database, manifest_keys=keys, apply=not dry_run,
         )
+        if not dry_run:
+            acknowledge_verified_slot(table, event, result)
         print(json.dumps({"status": "WAREHOUSE_PREVIEW" if dry_run else "WAREHOUSE_CATCHUP",
                           "outcomes": result}, sort_keys=True))
         return {"loaded": sum(x["status"] == "LOADED" for x in result),
