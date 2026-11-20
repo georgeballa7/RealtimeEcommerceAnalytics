@@ -127,3 +127,20 @@ def test_morning_and_afternoon_use_distinct_daily_nat_records():
     day = "2026-11-21"
     assert mod.slot_key(day, "morning") != mod.slot_key(day, "afternoon")
     assert mod.slot_key(day, "morning") == "phase6-nat:2026-11-21:morning"
+
+
+def test_nat_release_window_advances_only_after_legacy_cutover(monkeypatch):
+    at = datetime(2026, 11, 21, 16, 35, tzinfo=BERLIN)
+    monkeypatch.delenv("PHASE5_LEGACY_LIFECYCLE_ENABLED", raising=False)
+    assert not mod.can_consider_release(at, "afternoon")
+    monkeypatch.setenv("PHASE5_LEGACY_LIFECYCLE_ENABLED", "false")
+    assert mod.can_consider_release(at, "afternoon")
+    monkeypatch.setenv("PHASE5_LEGACY_LIFECYCLE_ENABLED", "true")
+    assert not mod.can_consider_release(at, "afternoon")
+
+
+def test_terraform_legacy_schedule_defaults_to_preserved_until_verified():
+    script = (ROOT / "infrastructure/terraform/phase5_scheduled_lifecycle.tf").read_text()
+    assert 'enable_phase5_legacy_lifecycle_schedule' in script
+    assert 'default     = true' in script
+    assert 'var.enable_phase5_legacy_lifecycle_schedule ? 1 : 0' in script
