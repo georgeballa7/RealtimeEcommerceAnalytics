@@ -1,0 +1,36 @@
+name: Phase 6 Glue PySpark validation
+
+on:
+  push:
+    branches:
+      - feature/redshift-warehouse-dbt-churn
+    paths:
+      - "scripts/glue/**"
+      - "tests/unit/test_phase6_glue_silver_contract.py"
+      - "analytics/redshift/silver_staging_schema.sql"
+      - ".github/workflows/phase6-glue-validate.yml"
+  pull_request:
+    paths:
+      - "scripts/glue/**"
+      - "tests/unit/test_phase6_glue_silver_contract.py"
+      - "analytics/redshift/silver_staging_schema.sql"
+      - ".github/workflows/phase6-glue-validate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  glue-silver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Glue-compatible local Spark
+        run: python -m pip install pytest pyspark==3.5.4 boto3
+      - name: Compile Glue job
+        run: python -m py_compile scripts/glue/phase6_shopify_silver.py
+      - name: Test source-to-Redshift contract and Spark DQ
+        run: pytest -q tests/unit/test_phase6_glue_silver_contract.py
