@@ -2,7 +2,7 @@
 # Requires the existing phase5_generator.tf resources in the GitHub repository.
 # Generator container uses Dockerfile.phase5-generator and slot runner.
 variable "enable_phase5_legacy_lifecycle_schedule" {
-  description = "Keep the standalone 18:00 cancellation job until BOTH daily combined slots pass end-to-end validation. Turn off in the same reviewed cutover as combined generator/coordinator rollout."
+  description = "Enable standalone 22:00 nightly lifecycle for the development store. Keep enabled until an explicitly reviewed replacement is operational."
   type        = bool
   default     = true
 }
@@ -59,6 +59,11 @@ resource "aws_iam_role_policy" "phase5_lifecycle_journal" {
         Effect = "Allow"
         Action = ["s3:GetObject", "s3:PutObject"]
         Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/lifecycle/v1/*"
+      },
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/slots/v1/*"
       }
     ]
   })
@@ -183,14 +188,14 @@ resource "aws_scheduler_schedule" "phase5_lifecycle" {
   count = var.phase5_lifecycle_image != "" && var.enable_phase5_legacy_lifecycle_schedule ? 1 : 0
   name = "ecommerce-${var.environment}-phase5-lifecycle"
   state = "ENABLED"
-  schedule_expression = "cron(0 18 * * ? *)"
+  schedule_expression = "cron(0 22 * * ? *)"
   schedule_expression_timezone = "Europe/Berlin"
   flexible_time_window { mode = "OFF" }
   target {
     arn = aws_ecs_cluster.ecommerce.arn
     role_arn = aws_iam_role.phase5_scheduler.arn
     input = jsonencode({
-      containerOverrides = [{ name = "phase5-lifecycle", command = ["--apply", "--confirm-apply"] }]
+      containerOverrides = [{ name = "phase5-lifecycle", command = ["--apply", "--confirm-apply", "--require-settled", "--commit-nightly", "--limit", "500"] }]
     })
     ecs_parameters {
       task_definition_arn = aws_ecs_task_definition.phase5_lifecycle[0].arn
