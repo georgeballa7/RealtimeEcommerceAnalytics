@@ -179,3 +179,24 @@ resource "aws_iam_role_policy" "phase6_coordinator_slot_readiness" {
     }]
   })
 }
+
+# Existing loader Lambda is deployed separately from this Terraform module.
+# Scope its new durable-ack permission to the existing controller ledger only.
+data "aws_lambda_function" "phase6_existing_silver_loader" {
+  count         = var.enable_phase6_glue_silver && var.enable_redshift_warehouse ? 1 : 0
+  function_name = "ecommerce-phase6-silver-redshift-loader-${var.environment}"
+}
+
+resource "aws_iam_role_policy" "phase6_silver_loader_ack" {
+  count = var.enable_phase6_glue_silver && var.enable_redshift_warehouse ? 1 : 0
+  name  = "ack-verified-shopify-silver-warehouse-slot"
+  role  = basename(data.aws_lambda_function.phase6_existing_silver_loader[0].role)
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
+      Resource = aws_dynamodb_table.phase5_controller.arn
+    }]
+  })
+}
