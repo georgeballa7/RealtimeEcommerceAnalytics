@@ -20,7 +20,7 @@ def build_command(slot: str, now: datetime, apply: bool = False, smoke_run_id: s
         raise ValueError("Invalid slot")
     local = now.astimezone(ZoneInfo("Europe/Berlin"))
     run_id = f"live-{local:%Y%m%d}-{slot}"
-    count = 20 if slot == "morning" else 25
+    count = 100 if slot == "morning" else 150
     if smoke_run_id is not None:
         if not re.fullmatch(r"smoke-[a-z0-9-]{4,58}", smoke_run_id):
             raise ValueError("Unsafe smoke run ID")
