@@ -2,13 +2,14 @@
 # No AWS credentials, Terraform backend access, or infrastructure mutations.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $entry = Join-Path $root 'scripts/aws/launch_phase6_glue.ps1'
 $global:ObservedPlan = $false
 $global:MockUnsafe = $false
 $global:MockApplyCalls = 0
 
 function global:aws {
+    $global:LASTEXITCODE = 0
     $argv = @($args)
     $qPos = [array]::IndexOf($argv, '--query')
     if ($qPos -lt 0) { throw ('Unexpected mock AWS command: ' + ($argv -join ' ')) }
@@ -40,6 +41,7 @@ function global:aws {
 }
 
 function global:terraform {
+    $global:LASTEXITCODE = 0
     $argv = @($args)
     switch ($argv[0]) {
         'init' { return 'mock initialized' }
