@@ -1,7 +1,6 @@
 """Coordinator must read the real Phase 5 events GSI, never controller index."""
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
-from zoneinfo import ZoneInfo
 
 from scripts.aws import phase6_evening_coordinator as mod
 
