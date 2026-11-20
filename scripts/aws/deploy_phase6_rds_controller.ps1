@@ -116,7 +116,10 @@ try {
         Assert-Exit 'Terraform init'
         & terraform validate
         Assert-Exit 'Terraform validate'
-        & terraform plan "-var-file=$tfvarsPath" "-out=$planPath"
+        # -no-color preserves Terraform's rejected variable names and expected
+        # types in redirected PowerShell output. Never print the tfvars JSON:
+        # it contains secret ARNs and immutable image URIs.
+        & terraform plan -no-color "-var-file=$tfvarsPath" "-out=$planPath"
         Assert-Exit 'Terraform plan'
         $plan = ((& terraform show -json $planPath | Out-String) | ConvertFrom-Json)
         Assert-Exit 'Terraform JSON'
