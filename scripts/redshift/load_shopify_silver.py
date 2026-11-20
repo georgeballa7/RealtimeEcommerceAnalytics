@@ -309,12 +309,15 @@ def lambda_handler(event, context):
     keys = discover_manifests(s3, bucket=bucket)
     if not keys:
         raise RuntimeError("No completed Glue Silver manifests")
+    dry_run = bool(event.get("dry_run", False))
     result = process_published_snapshots(
         s3=s3, data=data, bucket=bucket, role_arn=role_arn,
-        workgroup=workgroup, database=database, manifest_keys=keys, apply=True,
+        workgroup=workgroup, database=database, manifest_keys=keys, apply=not dry_run,
     )
-    print(json.dumps({"status": "WAREHOUSE_CATCHUP", "outcomes": result}, sort_keys=True))
-    return {"loaded": sum(x["status"] == "LOADED" for x in result), "outcomes": result}
+    print(json.dumps({"status": "WAREHOUSE_PREVIEW" if dry_run else "WAREHOUSE_CATCHUP",
+                      "outcomes": result}, sort_keys=True))
+    return {"loaded": sum(x["status"] == "LOADED" for x in result),
+            "dry_run": dry_run, "outcomes": result}
 
 
 def main():
