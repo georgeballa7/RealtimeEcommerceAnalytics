@@ -109,3 +109,11 @@ def test_phase6_combined_release_preserves_scheduled_clock_times():
     assert 'morning = { cron = "cron(0 8 * * ? *)", count = 100 }' in lifecycle
     assert 'afternoon = { cron = "cron(0 16 * * ? *)", count = 150 }' in lifecycle
     assert 'schedule_expression_timezone = "Europe/Berlin"' in lifecycle
+
+
+def test_phase6_release_image_helper_does_not_mix_docker_logs_with_uri():
+    source = (ROOT / "scripts/aws/deploy_phase6_rds_controller.ps1").read_text()
+    assert '--tag $imageTag $root | Out-Host' in source
+    assert '& docker --config $tempConfig push $imageTag | Out-Host' in source
+    assert '$newImage -isnot [string] -or $newGeneratorImage -isnot [string]' in source
+    assert 'terraform plan -no-color' in source
