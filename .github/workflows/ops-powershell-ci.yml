@@ -39,3 +39,11 @@ jobs:
       - name: Exercise Phase 6 wrapper with mocked native commands
         shell: pwsh
         run: ./tests/test_phase6_glue_launch.ps1
+
+  windows-native-args:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise launch wrapper under Windows PowerShell 5.1
+        shell: powershell
+        run: .\\tests\\test_phase6_glue_launch.ps1
