@@ -138,8 +138,8 @@ resource "aws_iam_role_policy" "phase5_scheduler" {
 
 locals {
   phase5_generation_slots = {
-    morning = { cron = "cron(0 8 * * ? *)", count = 20 }
-    afternoon = { cron = "cron(0 16 * * ? *)", count = 25 }
+    morning = { cron = "cron(0 8 * * ? *)", count = 100 }
+    afternoon = { cron = "cron(0 16 * * ? *)", count = 150 }
   }
 }
 
