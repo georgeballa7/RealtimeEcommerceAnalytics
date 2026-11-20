@@ -22,7 +22,7 @@ CTRL_ID = "phase5-controller"
 # Keep the original afternoon key to preserve existing same-day run records.
 # The morning slot gets a distinct idempotency key in the SAME controller table.
 SLOT_IDS = {"morning": "phase6-morning", "afternoon": "phase6-evening"}
-SLOT_HOURS = {"morning": range(8, 14), "afternoon": range(16, 22)}
+SLOT_HOURS = {"morning": range(8, 16), "afternoon": range(16, 22)}
 CLUSTER = "ecommerce-demo"
 RDS_ID = "ecommerce-postgres-dev"
 JOB = "ecommerce-phase6-shopify-silver-demo"
@@ -169,6 +169,16 @@ def handler(event, context):
     aws = boto3.Session(region_name=REGION)
     ddb = aws.resource("dynamodb")
     table = ddb.Table(TABLE)
+    # If a morning run is still in progress at 16:00, complete that run
+    # before permitting the afternoon slot to reserve a new Glue/RDS lease.
+    # This protects delayed Glue jobs during the schedule boundary.
+    if slot == "afternoon":
+        morning = table.get_item(
+            Key={"id": SLOT_IDS["morning"]}, ConsistentRead=True
+        ).get("Item", {})
+        if morning.get("day") == day and morning.get("phase") in ("reserved", "started"):
+            slot = "morning"
+            day_id = SLOT_IDS["morning"]
     previous = table.get_item(Key={"id": day_id}, ConsistentRead=True).get("Item", {})
     ctrl = table.get_item(Key={"id": CTRL_ID}, ConsistentRead=True).get("Item", {})
     glue = aws.client("glue")
