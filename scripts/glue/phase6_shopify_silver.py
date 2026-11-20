@@ -64,6 +64,19 @@ REQUIRED_NON_NULL = {
     "shopify_live_refund_line": ["shop_domain", "shopify_refund_id", "shopify_refund_line_id", "quantity", "subtotal"],
     "shopify_customer_identity": ["shop_gid", "customer_id", "shopify_customer_gid", "status"],
 }
+VARCHAR_LIMITS = {
+    "shopify_live_order": {
+        "shop_domain": 255, "shopify_customer_gid": 255, "currency": 3,
+        "financial_status": 80, "fulfillment_status": 80,
+    },
+    "shopify_live_order_line": {"shop_domain": 255, "sku": 128},
+    "shopify_live_refund": {"shop_domain": 255, "payload_sha256": 64},
+    "shopify_live_refund_line": {"shop_domain": 255},
+    "shopify_customer_identity": {
+        "shop_gid": 255, "customer_id": 40, "source_system": 80,
+        "source_customer_id": 80, "shopify_customer_gid": 255, "status": 40,
+    },
+}
 SAFE_BATCH = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
 SCHEMA_VERSION = "shopify-live-silver-v1"
 
@@ -84,6 +97,8 @@ def to_contract(frame, table):
 def add_reasons(frame, table):
     reasons = [F.when(F.col(c).isNull() | (F.trim(F.col(c)) == "" if c in ("shop_domain", "currency", "shop_gid", "customer_id", "shopify_customer_gid", "status") else F.lit(False)),
                       F.lit("missing_or_invalid_" + c)) for c in REQUIRED_NON_NULL[table]]
+    reasons += [F.when(F.length(F.col(name)) > max_length, F.lit("varchar_overflow_" + name))
+                for name, max_length in VARCHAR_LIMITS[table].items()]
     if table == "shopify_live_order":
         reasons += [
             F.when(~F.col("currency").rlike("^[A-Z]{3}$"), F.lit("invalid_currency")),
@@ -101,9 +116,6 @@ def add_reasons(frame, table):
             F.when(F.col("quantity") <= 0, F.lit("nonpositive_refund_quantity")),
             F.when(F.col("subtotal") < 0, F.lit("negative_refund_subtotal")),
         ]
-    elif table == "shopify_customer_identity":
-        reasons += [F.when(~F.col("status").isin("verified", "pending", "unmatched"),
-                           F.lit("unrecognized_identity_status"))]
     return frame.withColumn("dq_reasons", F.filter(F.array(*reasons), lambda value: value.isNotNull()))
 
 
