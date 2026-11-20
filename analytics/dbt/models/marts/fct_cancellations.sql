@@ -7,5 +7,5 @@ select
   cancelled_amount as cancelled_merchandise_gbp,
   financial_semantics,
   true as is_simulated
-from {{ source('raw','synthetic_cancellations') }}
+from {{ source('silver_staging','synthetic_cancellations') }}
 where provenance = 'simulated_cancellation_not_verified_refund'
