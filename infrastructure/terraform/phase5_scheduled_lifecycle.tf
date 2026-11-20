@@ -47,7 +47,9 @@ resource "aws_iam_role_policy" "phase5_lifecycle_journal" {
         Action = ["s3:ListBucket"]
         Resource = aws_s3_bucket.landing.arn
         Condition = { StringLike = { "s3:prefix" = [
-          "simulation/phase5/live/v1/", "simulation/phase5/live/v1/*"
+          "simulation/phase5/live/v1/", "simulation/phase5/live/v1/*",
+          "simulation/phase5/lifecycle/v1/", "simulation/phase5/lifecycle/v1/*",
+          "simulation/phase5/slots/v1/", "simulation/phase5/slots/v1/*"
         ] } }
       },
       {
