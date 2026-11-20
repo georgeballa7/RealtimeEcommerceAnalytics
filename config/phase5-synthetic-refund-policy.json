@@ -1,12 +1,13 @@
 {
   "version": "phase5-synthetic-refund-policy-v1",
-  "mode": "transactionless_shopify_refund_only",
+  "mode": "development_store_test_gateway_only",
   "currency": "GBP",
   "probability_percent": 5,
   "max_delay_days": 2,
   "refund_quantity_per_order": 1,
   "max_refunds_per_order": 1,
   "restock_type": "NO_RESTOCK",
-  "payment_transactions_allowed": false,
-  "notify_customer": false
+  "notify_customer": false,
+  "allow_test_transactions": true,
+  "block_non_test_transactions": true
 }
