@@ -19,7 +19,7 @@ from uuid import uuid5, NAMESPACE_URL
 ORDER_QUERY = """query Phase5Order($id: ID!) {
   order(id: $id) {
     id createdAt cancelledAt currencyCode displayFinancialStatus
-    transactions(first: 20) { id kind status gateway }
+    transactions(first: 20) { id kind status gateway test }
     lineItems(first: 100) { pageInfo { hasNextPage } nodes { id quantity refundableQuantity } }
     refunds { id note }
   }
@@ -107,17 +107,21 @@ def synthetic_refund_plan(run_id: str, order_id: str, created_at: datetime, *,
 
 
 def require_nonfinancial_simulation(order: dict) -> None:
-    """Block automatic Shopify refund if ANY payment transaction is recorded.
+    """Allow dev-shop refund effects on unpaid or explicitly test transactions.
 
-    A successful Shopify refund object by itself does not prove a cash transfer.
-    For this safe test path, all existing transactions must be absent; unknown
-    transaction information fails closed rather than authorizing a payment.
+    An order with any non-test payment transaction is never eligible for the
+    automatic simulation, even if the shop currently happens to be a dev store.
+    Transaction information that cannot be verified fails closed.
     """
     transactions = order.get("transactions")
-    if not isinstance(transactions, list) or transactions:
-        raise LifecycleError("Automatic synthetic refund requires verified transactionless order")
-    if order.get("displayFinancialStatus") not in {"PENDING", "VOIDED"}:
-        raise LifecycleError("Automatic synthetic refund requires unpaid/voided financial status")
+    if not isinstance(transactions, list):
+        raise LifecycleError("Automatic synthetic refund requires verified transaction history")
+    if not transactions:
+        if order.get("displayFinancialStatus") not in {"PENDING", "VOIDED"}:
+            raise LifecycleError("Automatic synthetic refund requires unpaid/voided financial status")
+    elif any(not isinstance(tx, dict) or tx.get("test") is not True
+             for tx in transactions):
+        raise LifecycleError("Automatic synthetic refund refuses non-test gateway transactions")
 
 
 @dataclass(frozen=True)
