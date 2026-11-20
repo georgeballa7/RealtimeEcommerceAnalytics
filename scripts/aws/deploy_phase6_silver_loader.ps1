@@ -12,7 +12,7 @@ param([switch]$Apply)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $Region = 'eu-central-1'
-$Profile = 'ecommerce-admin'
+$AwsProfile = 'ecommerce-admin'
 $Account = '825414820081'
 $Function = 'ecommerce-phase6-silver-redshift-loader-demo'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -27,7 +27,10 @@ try {
         -not $sourceText.Contains('process_published_snapshots(')) {
         throw 'Loader missing verified manifest or durable acknowledgement contract'
     }
-    & python -X utf8 -c 'import ast,sys;ast.parse(open(sys.argv[1],encoding="utf-8").read())' $Source
+    # Match the Windows-tested coordinator pattern: -X utf8 sets the encoding.
+    # Never embed double-quoted Python strings in a PowerShell native -c argument;
+    # Windows PowerShell 5.1 strips those quotes (causing NameError: utf).
+    & python -X utf8 -c 'import ast,sys;ast.parse(open(sys.argv[1]).read())' $Source
     if ($LASTEXITCODE -ne 0) { throw 'Loader Python AST validation failed' }
 
     New-Item -ItemType Directory -Path $Temp -Force | Out-Null
@@ -51,28 +54,28 @@ try {
         return
     }
 
-    $CurrentAccount = (& aws sts get-caller-identity --profile $Profile --region $Region --query Account --output text | Out-String).Trim()
+    $CurrentAccount = (& aws sts get-caller-identity --profile $AwsProfile --region $Region --query Account --output text | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $CurrentAccount -ne $Account) { throw 'Wrong AWS account' }
-    $Cfg = (& aws lambda get-function-configuration --function-name $Function --profile $Profile --region $Region --output json | Out-String | ConvertFrom-Json)
+    $Cfg = (& aws lambda get-function-configuration --function-name $Function --profile $AwsProfile --region $Region --output json | Out-String | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0 -or $Cfg.PackageType -ne 'Zip' -or
         $Cfg.Runtime -ne 'python3.12' -or $Cfg.Handler -ne 'index.lambda_handler' -or
         $Cfg.Role -ne "arn:aws:iam::${Account}:role/ecommerce-phase6-redshift-loader-demo") {
         throw 'Unexpected loader Lambda configuration; refused'
     }
     $ControllerArn = "arn:aws:dynamodb:${Region}:${Account}:table/ecommerce-demo-phase5-controller"
-    $Simulation = (& aws iam simulate-principal-policy --policy-source-arn $Cfg.Role --action-names dynamodb:GetItem dynamodb:UpdateItem --resource-arns $ControllerArn --profile $Profile --region $Region --output json | Out-String | ConvertFrom-Json)
+    $Simulation = (& aws iam simulate-principal-policy --policy-source-arn $Cfg.Role --action-names dynamodb:GetItem dynamodb:UpdateItem --resource-arns $ControllerArn --profile $AwsProfile --region $Region --output json | Out-String | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0 -or @($Simulation.EvaluationResults).Count -ne 2 -or
         @($Simulation.EvaluationResults | Where-Object { $_.EvalDecision -ne 'allowed' }).Count -ne 0) {
         throw 'Loader IAM lacks verified slot acknowledgement permissions; apply reviewed Terraform first'
     }
     $Uri = 'fileb://' + ($Zip -replace '\\', '/')
-    $Upload = (& aws lambda update-function-code --function-name $Function --zip-file $Uri --profile $Profile --region $Region --output json | Out-String | ConvertFrom-Json)
+    $Upload = (& aws lambda update-function-code --function-name $Function --zip-file $Uri --profile $AwsProfile --region $Region --output json | Out-String | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0 -or $Upload.CodeSha256 -ne $ExpectedCodeHash) {
         throw 'Loader upload failed or returned unexpected SHA-256'
     }
-    & aws lambda wait function-updated --function-name $Function --profile $Profile --region $Region
+    & aws lambda wait function-updated --function-name $Function --profile $AwsProfile --region $Region
     if ($LASTEXITCODE -ne 0) { throw 'Loader update did not reach stable state' }
-    $Final = (& aws lambda get-function-configuration --function-name $Function --profile $Profile --region $Region --output json | Out-String | ConvertFrom-Json)
+    $Final = (& aws lambda get-function-configuration --function-name $Function --profile $AwsProfile --region $Region --output json | Out-String | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0 -or $Final.CodeSha256 -ne $ExpectedCodeHash -or
         $Final.LastUpdateStatus -ne 'Successful') {
         throw 'Loader deployment verification FAILED'
