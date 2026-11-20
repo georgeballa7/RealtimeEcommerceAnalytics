@@ -209,8 +209,8 @@ def main() -> None:
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,63}", args.run_id):
         parser.error("Invalid run ID (3-64 letters/numbers/underscore/hyphen)")
-    if not 1 <= args.count <= 100:
-        parser.error("Count must be 1..100")
+    if not 1 <= args.count <= 150:
+        parser.error("Count must be 1..150")
     if args.apply and args.confirm_run_id != args.run_id:
         parser.error("Write mode requires exact --confirm-run-id")
     for env in ("SHOPIFY_SHOP_DOMAIN", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET"):
