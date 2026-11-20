@@ -10,6 +10,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from ecommerce.application.use_cases.shopify_order_lifecycle import (
@@ -121,6 +122,37 @@ def eligible_synthetic_refunds(gql, records, *, now, policy, refund_policy, jour
                             candidates[0], 1, synthetic_nonfinancial=True)
 
 
+
+def publish_nightly_lifecycle(s3, bucket: str, day: str, stats: dict) -> None:
+    """Publish last, after cancellation/refund mutations have settled.
+
+    Both Shopify generation slots must have committed independently first.
+    The resulting marker permits a complete post-22:00 RDS/Glue snapshot.
+    """
+    from botocore.exceptions import ClientError
+    for slot in ("morning", "afternoon"):
+        run_id = f"live-{day.replace('-', '')}-{slot}"
+        key = f"simulation/phase5/slots/v1/{run_id}.json"
+        observed = json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
+        if observed != {"schema_version": 1, "run_id": run_id,
+                        "slot": slot, "generation": "complete"}:
+            raise RuntimeError(f"Incomplete or invalid generation marker: {run_id}")
+    if stats.get("mode") != "APPLY":
+        raise RuntimeError("Nightly completion requires applied lifecycle actions")
+    key = f"simulation/phase5/slots/v1/lifecycle-{day}.json"
+    marker = {"schema_version": 1, "day": day, "lifecycle": "settled",
+              "generation_slots": ["morning", "afternoon"]}
+    try:
+        s3.put_object(Bucket=bucket, Key=key, IfNoneMatch="*",
+                      Body=json.dumps(marker, sort_keys=True).encode(),
+                      ContentType="application/json")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
+            raise
+        existing = json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
+        if existing != marker:
+            raise RuntimeError("Conflicting lifecycle commit marker") from exc
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run-id", action="append",
@@ -131,9 +163,13 @@ def main():
     ap.add_argument("--refund-line", help="Existing Shopify line-item GID")
     ap.add_argument("--refund-quantity", type=int)
     ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--commit-nightly", action="store_true",
+                    help="Commit the 22:00 lifecycle only after settled operations")
     ap.add_argument("--require-settled", action="store_true",
                     help="Fail closed unless every selected lifecycle operation settles")
     args = ap.parse_args()
+    if args.commit_nightly and (not args.apply or not args.require_settled or args.refund_order):
+        ap.error("Nightly lifecycle requires --apply --confirm-apply --require-settled without explicit refund")
     if args.apply != args.confirm_apply:
         ap.error("Applying mutations requires --apply --confirm-apply")
     if not 1 <= args.limit <= (500 if args.require_settled else 100):
@@ -216,6 +252,9 @@ def main():
             if pending:
                 raise RuntimeError(
                     f"Scheduled lifecycle still has {len(pending)} unsettled Shopify operations")
+        if args.commit_nightly:
+            local_day = now.astimezone(ZoneInfo("Europe/Berlin")).date().isoformat()
+            publish_nightly_lifecycle(s3, bucket, local_day, stats)
         print(json.dumps(stats, sort_keys=True))
 
 if __name__ == "__main__":
