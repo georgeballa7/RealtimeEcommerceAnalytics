@@ -67,8 +67,8 @@ resource "aws_iam_role_policy" "phase6_glue_data" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
         Resource = [
           "${aws_s3_bucket.landing.arn}/warehouse/shopify_snapshots/v1/*",
           "${aws_s3_bucket.landing.arn}/glue/phase6_shopify_silver.py",
@@ -103,9 +103,9 @@ resource "aws_glue_connection" "phase6_rds_network" {
   name            = "ecommerce-phase6-rds-network-${var.environment}"
   connection_type = "NETWORK"
   physical_connection_requirements {
-    subnet_id                 = aws_subnet.application[0].id
-    security_group_id_list    = [aws_security_group.phase6_glue[0].id]
-    availability_zone         = aws_subnet.application[0].availability_zone
+    subnet_id              = aws_subnet.application[0].id
+    security_group_id_list = [aws_security_group.phase6_glue[0].id]
+    availability_zone      = aws_subnet.application[0].availability_zone
   }
   depends_on = [
     aws_vpc_security_group_ingress_rule.phase6_glue_self,
@@ -123,15 +123,15 @@ resource "aws_s3_object" "phase6_glue_silver_script" {
 }
 
 resource "aws_glue_job" "phase6_shopify_silver" {
-  count               = var.enable_phase6_glue_silver ? 1 : 0
-  name                = "ecommerce-phase6-shopify-silver-${var.environment}"
-  role_arn            = aws_iam_role.phase6_glue[0].arn
-  glue_version        = "5.0"
-  worker_type         = "G.1X"
-  number_of_workers   = 2
-  timeout             = 20
-  max_retries         = 0
-  connections         = [aws_glue_connection.phase6_rds_network[0].name]
+  count             = var.enable_phase6_glue_silver ? 1 : 0
+  name              = "ecommerce-phase6-shopify-silver-${var.environment}"
+  role_arn          = aws_iam_role.phase6_glue[0].arn
+  glue_version      = "5.0"
+  worker_type       = "G.1X"
+  number_of_workers = 2
+  timeout           = 20
+  max_retries       = 0
+  connections       = [aws_glue_connection.phase6_rds_network[0].name]
   execution_property { max_concurrent_runs = 1 }
   command {
     name            = "glueetl"
@@ -139,14 +139,14 @@ resource "aws_glue_job" "phase6_shopify_silver" {
     script_location = "s3://${aws_s3_bucket.landing.bucket}/${aws_s3_object.phase6_glue_silver_script[0].key}"
   }
   default_arguments = {
-    "--job-language"      = "python"
-    "--enable-metrics"    = "true"
-    "--bucket"            = aws_s3_bucket.landing.bucket
-    "--db-host"           = aws_db_instance.ecommerce.address
-    "--db-name"           = var.db_name
-    "--secret-arn"        = aws_secretsmanager_secret.api_database.arn
-    "--region"            = var.aws_region
-    "--TempDir"           = "s3://${aws_s3_bucket.landing.bucket}/glue/tmp/"
+    "--job-language"   = "python"
+    "--enable-metrics" = "true"
+    "--bucket"         = aws_s3_bucket.landing.bucket
+    "--db-host"        = aws_db_instance.ecommerce.address
+    "--db-name"        = var.db_name
+    "--secret-arn"     = aws_secretsmanager_secret.api_database.arn
+    "--region"         = var.aws_region
+    "--TempDir"        = "s3://${aws_s3_bucket.landing.bucket}/glue/tmp/"
   }
   depends_on = [
     aws_iam_role_policy_attachment.phase6_glue_service,
