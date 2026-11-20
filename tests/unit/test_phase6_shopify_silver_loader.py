@@ -118,3 +118,39 @@ def test_reject_duplicate_business_keys(staged):
     row={"shop_domain":"s","shopify_order_id":1}
     s3.objects[part]=gzip.compress((json.dumps(row)+"\n"+json.dumps(row)+"\n").encode())
     with pytest.raises(ValueError,match="Duplicate"):call(s3,db)
+
+
+def test_redshift_slot_completion_requires_manifest_and_matching_run():
+    from unittest.mock import Mock
+    table = Mock()
+    event = {"source": "phase6-morning", "run_id": "jr_abc123", "batch_id": BATCHES[0]}
+    manifest = x.PREFIX + BATCHES[0] + "/silver_manifest.json"
+    table.get_item.return_value = {"Item": {
+        "run_id": "jr_abc123", "batch_id": BATCHES[0], "phase": "dispatched"}}
+    assert x.acknowledge_verified_slot(table, event, [
+        {"manifest": manifest, "status": "LOADED"}])
+    table.update_item.assert_called_once()
+    assert table.update_item.call_args.kwargs["Key"]["id"] == "phase6-morning"
+    table.update_item.reset_mock()
+    with pytest.raises(RuntimeError, match="not committed"):
+        x.acknowledge_verified_slot(table, event, [
+            {"manifest": manifest, "status": "PENDING"}])
+    table.update_item.assert_not_called()
+
+
+def test_redshift_slot_ack_refuses_wrong_run_and_is_idempotent():
+    from unittest.mock import Mock
+    table = Mock()
+    event = {"source": "phase6-afternoon", "run_id": "jr_current", "batch_id": BATCHES[1]}
+    manifest = x.PREFIX + BATCHES[1] + "/silver_manifest.json"
+    loaded = [{"manifest": manifest, "status": "ALREADY_LOADED"}]
+    table.get_item.return_value = {"Item": {
+        "run_id": "jr_old", "batch_id": BATCHES[1], "phase": "dispatched"}}
+    with pytest.raises(RuntimeError, match="does not match"):
+        x.acknowledge_verified_slot(table, event, loaded)
+    table.get_item.return_value = {"Item": {
+        "run_id": "jr_current", "batch_id": BATCHES[1], "phase": "completed"}}
+    assert x.acknowledge_verified_slot(table, event, loaded)
+    table.update_item.assert_not_called()
+    assert x.acknowledge_verified_slot(
+        table, {"source": "external-glue-event"}, loaded) is False
