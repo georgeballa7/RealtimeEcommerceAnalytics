@@ -40,11 +40,28 @@ def log(action, **fields):
     return {"action": action, **fields}
 
 
-def quiet_now(now, controller, dynamodb, sqs, ecs, *, slot="afternoon"):
+def quiet_now(now, controller, dynamodb, sqs, ecs, *, slot="afternoon", s3=None):
     if not controller.get("schema_ready") or not controller.get("webhooks_ready"):
         return "phase5_not_ready"
     if controller.get("error_hold") or controller.get("worker_task_arn"):
         return "projection_not_finished"
+    # The combined generator publishes this marker only after Shopify order
+    # generation AND settled cancellation/refund processing succeeded.
+    # Without it, quiet queues could represent a failed generator, not success.
+    if s3 is not None:
+        from botocore.exceptions import ClientError
+        local = now.astimezone(ZoneInfo("Europe/Berlin"))
+        run_id = f"live-{local:%Y%m%d}-{slot}"
+        key = f"simulation/phase5/slots/v1/{run_id}.json"
+        try:
+            marker = json.loads(s3.get_object(Bucket=BUCKET, Key=key)["Body"].read())
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}:
+                return "slot_generation_or_lifecycle_not_complete"
+            raise
+        if marker != {"schema_version": 1, "run_id": run_id, "slot": slot,
+                      "generation": "complete", "lifecycle": "settled"}:
+            raise RuntimeError("Invalid or conflicting Phase 5 combined slot marker")
     last_event = controller.get("last_event_at")
     if not last_event:
         return "no_projected_slot_events"
@@ -184,7 +201,8 @@ def handler(event, context):
     glue = aws.client("glue")
     rds = aws.client("rds")
     if previous.get("day") != day:
-        reason = quiet_now(now, ctrl, ddb, aws.client("sqs"), aws.client("ecs"), slot=slot)
+        reason = quiet_now(now, ctrl, ddb, aws.client("sqs"), aws.client("ecs"),
+                           slot=slot, s3=aws.client("s3"))
         if reason:
             return log("waiting", slot=slot, reason=reason)
         owner = str(uuid4())
