@@ -251,9 +251,27 @@ def main():
         "published_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     # Manifest is commit marker, written only after all data quality checks pass.
-    s3.put_object(Bucket=args.bucket, Key=f"{prefix}/silver_manifest.json",
-                  Body=json.dumps(manifest, sort_keys=True).encode(),
-                  ContentType="application/json", IfNoneMatch="*")
+    manifest_key = f"{prefix}/silver_manifest.json"
+    # AWS Glue 5.0's bundled botocore may reject PutObject.IfNoneMatch at
+    # parameter validation. Use a fail-closed existence check and a unique
+    # batch ID. Glue is limited to one concurrent run by Terraform.
+    # The versioned bucket retains historical object versions.
+    from botocore.exceptions import ClientError
+
+    try:
+        s3.head_object(Bucket=args.bucket, Key=manifest_key)
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") not in (
+            "404", "NoSuchKey", "NotFound"
+        ):
+            raise
+    else:
+        raise FileExistsError("Silver manifest already exists: " + manifest_key)
+    s3.put_object(
+        Bucket=args.bucket, Key=manifest_key,
+        Body=json.dumps(manifest, sort_keys=True).encode(),
+        ContentType="application/json",
+    )
     print(json.dumps({"manifest": f"{prefix}/silver_manifest.json",
                       "counts": counts}, sort_keys=True))
 
