@@ -10,13 +10,13 @@ spec.loader.exec_module(m)
 def test_morning_deterministic_in_berlin():
     timestamp = datetime(2026, 11, 19, 7, 0, tzinfo=timezone.utc)
     command = m.build_command('morning', timestamp)
-    assert command[-4:] == ['--run-id', 'live-20261119-morning','--count','20']
+    assert command[-4:] == ['--run-id', 'live-20261119-morning','--count','100']
     assert '--apply' not in command
 
-def test_afternoon_produces_25_and_needs_explicit_apply():
+def test_afternoon_produces_150_and_needs_explicit_apply():
     timestamp = datetime(2026, 11, 19, 14, 0, tzinfo=timezone.utc)
     command = m.build_command('afternoon', timestamp, apply=True)
-    assert command[-4:] == ['25','--apply','--confirm-run-id','live-20261119-afternoon']
+    assert command[-4:] == ['150','--apply','--confirm-run-id','live-20261119-afternoon']
 
 def test_dst_time_uses_berlin_date_not_utc():
     timestamp = datetime(2027, 6, 1, 22, 30, tzinfo=timezone.utc)
