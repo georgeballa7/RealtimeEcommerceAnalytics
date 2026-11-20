@@ -16,16 +16,16 @@ import boto3
 
 SYNTHETIC_HEAD = "historical/online_retail_ii/synthetic/v1/state/head.json"
 SYNTHETIC_TABLES = {
-    "orders": (""raw".synthetic_orders", "order_id"),
-    "order_items": (""raw".synthetic_order_items", "order_item_id"),
-    "cancellations": (""raw".synthetic_cancellations", "event_id"),
+    "orders": ("silver_staging.synthetic_orders", "order_id"),
+    "order_items": ("silver_staging.synthetic_order_items", "order_item_id"),
+    "cancellations": ("silver_staging.synthetic_cancellations", "event_id"),
 }
 LIVE_TABLES = {
-    "shopify_live_order": ""raw".shopify_live_order",
-    "shopify_live_order_line": ""raw".shopify_live_order_line",
-    "shopify_live_refund": ""raw".shopify_live_refund",
-    "shopify_live_refund_line": ""raw".shopify_live_refund_line",
-    "shopify_customer_identity": ""raw".shopify_customer_identity",
+    "shopify_live_order": "silver_staging.shopify_live_order",
+    "shopify_live_order_line": "silver_staging.shopify_live_order_line",
+    "shopify_live_refund": "silver_staging.shopify_live_refund",
+    "shopify_live_refund_line": "silver_staging.shopify_live_refund_line",
+    "shopify_customer_identity": "silver_staging.shopify_customer_identity",
 }
 SAFE_S3_KEY = re.compile(r"^[a-zA-Z0-9_./=-]+$")
 SAFE_ARN = re.compile(r"^arn:aws:iam::[0-9]{12}:role/[a-zA-Z0-9_+=,.@/-]+$")
@@ -104,7 +104,7 @@ def run_data_api(client, *, workgroup: str, database: str, statements: list[str]
     raise TimeoutError("Redshift statement state uncertain; reconcile before replay")
 
 
-def raw_schema_exists(client, *, workgroup: str, database: str,
+def silver_staging_schema_exists(client, *, workgroup: str, database: str,
                       timeout: int = 120) -> bool:
     """Check the catalog before adding CREATE SCHEMA to the DDL batch.
 
@@ -113,7 +113,7 @@ def raw_schema_exists(client, *, workgroup: str, database: str,
     """
     execution_id = client.execute_statement(
         WorkgroupName=workgroup, Database=database,
-        Sql="SELECT 1 FROM pg_namespace WHERE nspname = 'raw'",
+        Sql="SELECT 1 FROM pg_namespace WHERE nspname = 'silver_staging'",
     )["Id"]
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -178,7 +178,7 @@ def main() -> None:
     parser.add_argument("--copy-role-arn", required=True)
     parser.add_argument("--profile", default="ecommerce-admin")
     parser.add_argument("--region", default="eu-central-1")
-    parser.add_argument("--live-manifest", help="Committed RDS snapshot manifest key")
+    parser.add_argument("--live-manifest", help="Reserved for Glue-validated Silver manifest (raw RDS snapshots are not accepted)")
     parser.add_argument("--apply", action="store_true", help="Explicit warehouse mutation")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{2,62}", args.bucket):
@@ -196,6 +196,7 @@ def main() -> None:
             verified_source_file(s3, args.bucket, spec)
         plans.append((manifest_key, manifest, "synthetic"))
     if args.live_manifest:
+        parser.error("Live Shopify must be validated by Glue and published to S3 Silver before Redshift load; raw RDS snapshots are not supported")
         if not args.live_manifest.startswith("warehouse/live_exports/v1/"):
             parser.error("Unapproved live manifest key")
         live = read_json(s3, args.bucket, args.live_manifest)
@@ -212,9 +213,9 @@ def main() -> None:
     if not args.apply:
         return
     data = session.client("redshift-data")
-    ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/raw_schema.sql"
+    ddl_path = Path(__file__).resolve().parents[2] / "analytics/redshift/silver_staging_schema.sql"
     ddl = [statement.strip() for statement in ddl_path.read_text().split(";") if statement.strip()]
-    if not raw_schema_exists(data, workgroup=args.workgroup, database=args.database):
+    if not silver_staging_schema_exists(data, workgroup=args.workgroup, database=args.database):
         ddl.insert(0, 'CREATE SCHEMA "raw"')
     run_data_api(data, workgroup=args.workgroup, database=args.database, statements=ddl)
     for manifest_key, manifest, kind in plans:
@@ -226,9 +227,9 @@ def main() -> None:
         ).hexdigest()
         escaped = manifest_key.replace("'", "''")
         src.append(
-            "INSERT INTO "raw".warehouse_load_ledger (load_id,manifest_key,manifest_sha256,source_type) "
+            "INSERT INTO silver_staging.warehouse_load_ledger (load_id,manifest_key,manifest_sha256,source_type) "
             f"SELECT '{manifest_sha}','{escaped}','{manifest_sha}','{kind}' "
-            f"WHERE NOT EXISTS (SELECT 1 FROM "raw".warehouse_load_ledger WHERE load_id='{manifest_sha}')"
+            f"WHERE NOT EXISTS (SELECT 1 FROM silver_staging.warehouse_load_ledger WHERE load_id='{manifest_sha}')"
         )
         outcome = run_data_api(data, workgroup=args.workgroup, database=args.database,
                                statements=src)
