@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ecommerce.application.use_cases.shopify_order_lifecycle import (
     ORDER_QUERY, Operation, advance, cancellation_plan, synthetic_refund_plan,
+    selected_for_simulation, stable_key,
 )
 from ecommerce.infrastructure.aws.lifecycle_journal import S3LifecycleJournal
 from ecommerce.infrastructure.shopify.client import ShopifyConfig, ShopifyClientCredentials, ShopifyGraphQLClient
@@ -52,8 +53,14 @@ def recent_generation_run_ids(s3, bucket: str, now: datetime, lookback_days: int
     return sorted(runs)
 
 
-def eligible_cancellations(gql, records, *, now, policy):
+def eligible_cancellations(gql, records, *, now, policy, journal=None):
     for run_id, order_id in records:
+        if not selected_for_simulation(
+                run_id, order_id, "cancel", seed=policy["seed"],
+                probability_percent=policy["cancellation_probability_percent"]):
+            continue
+        if journal and (journal.get(stable_key(run_id, order_id, "cancel")) or {}).get("state") == "complete":
+            continue
         details = gql.query(ORDER_QUERY, {"id": order_id}).get("order")
         if not details or details.get("id") != order_id:
             raise RuntimeError("Completed generation order not found in Shopify")
@@ -68,13 +75,19 @@ def eligible_cancellations(gql, records, *, now, policy):
 
 
 
-def eligible_synthetic_refunds(gql, records, *, now, policy, refund_policy):
+def eligible_synthetic_refunds(gql, records, *, now, policy, refund_policy, journal=None):
     """One stable, nonfinancial refund candidate per verified synthetic order.
 
     Skip candidates selected for cancellation. No real-payment refund may enter
     the scheduled workflow. Explicit operational refunds remain separate.
     """
     for run_id, order_id in records:
+        if not selected_for_simulation(
+                run_id, order_id, "refund", seed=policy["seed"],
+                probability_percent=refund_policy["probability_percent"]):
+            continue
+        if journal and (journal.get(stable_key(run_id, order_id, "refund")) or {}).get("state") == "complete":
+            continue
         order = gql.query(ORDER_QUERY, {"id": order_id}).get("order")
         if not order or order.get("id") != order_id:
             raise RuntimeError("Synthetic source order missing in Shopify")
@@ -161,9 +174,9 @@ def main():
             ids = args.run_id or recent_generation_run_ids(s3, bucket, now)
             gen_records = completed_generation_records(s3, bucket, run_ids=ids)
             generation = list(gen_records)
-            operations = list(eligible_cancellations(gql, generation, now=now, policy=policy))
+            operations = list(eligible_cancellations(gql, generation, now=now, policy=policy, journal=journal))
             operations.extend(eligible_synthetic_refunds(
-                gql, generation, now=now, policy=policy, refund_policy=refund_policy))
+                gql, generation, now=now, policy=policy, refund_policy=refund_policy, journal=journal))
             # A backlog of previously completed operations must not starve new
             # refunds/cancellations under the existing per-run limit.
             operations = [op for op in operations
