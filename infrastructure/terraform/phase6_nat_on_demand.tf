@@ -5,19 +5,19 @@
 data "archive_file" "phase6_nat_lifecycle" {
   count       = var.nat_gateway_mode == "on_demand" ? 1 : 0
   type        = "zip"
-  source_file = "\${path.module}/../../scripts/aws/phase6_nat_lifecycle_lambda.py"
-  output_path = "\${path.module}/.terraform/phase6_nat_lifecycle.zip"
+  source_file = "${path.module}/../../scripts/aws/phase6_nat_lifecycle_lambda.py"
+  output_path = "${path.module}/.terraform/phase6_nat_lifecycle.zip"
 }
 
 resource "aws_cloudwatch_log_group" "phase6_nat_lifecycle" {
   count             = var.nat_gateway_mode == "on_demand" ? 1 : 0
-  name              = "/aws/lambda/ecommerce-phase6-nat-lifecycle-\${var.environment}"
+  name              = "/aws/lambda/ecommerce-phase6-nat-lifecycle-${var.environment}"
   retention_in_days = 14
 }
 
 resource "aws_iam_role" "phase6_nat_lifecycle" {
   count = var.nat_gateway_mode == "on_demand" ? 1 : 0
-  name  = "ecommerce-phase6-nat-lifecycle-\${var.environment}"
+  name  = "ecommerce-phase6-nat-lifecycle-${var.environment}"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -54,7 +54,7 @@ resource "aws_iam_role_policy" "phase6_nat_lifecycle" {
       {
         Effect = "Allow"
         Action = ["ec2:CreateTags"]
-        Resource = "arn:aws:ec2:\${var.aws_region}:\${var.aws_account_id}:natgateway/*"
+        Resource = "arn:aws:ec2:${var.aws_region}:${var.aws_account_id}:natgateway/*"
         Condition = {
           StringEquals = { "ec2:CreateAction" = "CreateNatGateway" }
         }
@@ -62,7 +62,7 @@ resource "aws_iam_role_policy" "phase6_nat_lifecycle" {
       {
         Effect = "Allow"
         Action = ["ec2:DeleteNatGateway"]
-        Resource = "arn:aws:ec2:\${var.aws_region}:\${var.aws_account_id}:natgateway/*"
+        Resource = "arn:aws:ec2:${var.aws_region}:${var.aws_account_id}:natgateway/*"
         Condition = {
           StringEquals = { "ec2:ResourceTag/Purpose" = "phase6-dynamic-nat" }
         }
@@ -80,7 +80,7 @@ resource "aws_iam_role_policy" "phase6_nat_lifecycle" {
       {
         Effect   = "Allow"
         Action   = ["dynamodb:Query"]
-        Resource = "\${aws_dynamodb_table.phase5_events.arn}/index/by_state"
+        Resource = "${aws_dynamodb_table.phase5_events.arn}/index/by_state"
       },
       {
         Effect   = "Allow"
@@ -95,7 +95,7 @@ resource "aws_iam_role_policy" "phase6_nat_lifecycle" {
       {
         Effect   = "Allow"
         Action   = ["glue:GetJobRuns"]
-        Resource = "arn:aws:glue:\${var.aws_region}:\${var.aws_account_id}:job/ecommerce-phase6-shopify-silver-\${var.environment}"
+        Resource = "arn:aws:glue:${var.aws_region}:${var.aws_account_id}:job/ecommerce-phase6-shopify-silver-${var.environment}"
       },
     ]
   })
@@ -103,7 +103,7 @@ resource "aws_iam_role_policy" "phase6_nat_lifecycle" {
 
 resource "aws_lambda_function" "phase6_nat_lifecycle" {
   count            = var.nat_gateway_mode == "on_demand" ? 1 : 0
-  function_name    = "ecommerce-phase6-nat-lifecycle-\${var.environment}"
+  function_name    = "ecommerce-phase6-nat-lifecycle-${var.environment}"
   filename         = data.archive_file.phase6_nat_lifecycle[0].output_path
   source_code_hash = data.archive_file.phase6_nat_lifecycle[0].output_base64sha256
   handler          = "phase6_nat_lifecycle_lambda.handler"
@@ -123,7 +123,7 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
       EVENTS_TABLE                 = aws_dynamodb_table.phase5_events.name
       EVENT_QUEUE_URL              = aws_sqs_queue.events.url
       ECS_CLUSTER                  = aws_ecs_cluster.ecommerce.name
-      GLUE_JOB_NAME                = "ecommerce-phase6-shopify-silver-\${var.environment}"
+      GLUE_JOB_NAME                = "ecommerce-phase6-shopify-silver-${var.environment}"
     }
   }
 
@@ -145,7 +145,7 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
 # Existing 08:00/16:00 ECS and 18:00 lifecycle schedules are unchanged.
 resource "aws_iam_role" "phase6_nat_schedule" {
   count = var.nat_gateway_mode == "on_demand" ? 1 : 0
-  name  = "ecommerce-phase6-nat-scheduler-\${var.environment}"
+  name  = "ecommerce-phase6-nat-scheduler-${var.environment}"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -172,7 +172,7 @@ resource "aws_iam_role_policy" "phase6_nat_schedule" {
 
 resource "aws_scheduler_schedule" "phase6_nat_lifecycle" {
   count               = var.nat_gateway_mode == "on_demand" ? 1 : 0
-  name                = "ecommerce-phase6-nat-lifecycle-\${var.environment}"
+  name                = "ecommerce-phase6-nat-lifecycle-${var.environment}"
   schedule_expression = "rate(5 minutes)"
   state               = "ENABLED"
 
