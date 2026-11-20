@@ -63,24 +63,31 @@ $generatorImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "
 $lifecycleImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "--task-definition", $lifecycleTask, "--query", "taskDefinition.containerDefinitions[0].image")
 $projectorImage = Invoke-AwsText -AwsArgs @("ecs", "describe-task-definition", "--task-definition", $projectorTask, "--query", "taskDefinition.containerDefinitions[0].image")
 
-# Preserve the existing warehouse and all deployed Phase 5 inputs; otherwise
-# Terraform defaults can plan destruction of operational resources.
-# Windows PowerShell 5.1 can split -var=key=value at native-process boundaries.
-# Use Terraform's two-argument -var KEY=VALUE form instead, preserving each
-# var assignment as one distinct native argument.
-$tfvars = @(
-    "-var", "aws_account_id=$ExpectedAccount",
-    "-var", "aws_profile=$ProfileName",
-    "-var", "aws_region=$Region",
-    "-var", "shopify_shop_domain=$domain",
-    "-var", "shopify_client_credentials_secret_arn=$secretArn",
-    "-var", "shopify_webhook_secret_arn=$secretArn",
-    "-var", "phase5_lambda_image=$lambdaImage",
-    "-var", "phase5_generator_image=$generatorImage",
-    "-var", "phase5_projector_image=$projectorImage",
-    "-var", "phase5_lifecycle_image=$lifecycleImage",
-    "-var", "enable_redshift_warehouse=true",
-    "-var", "enable_phase6_glue_silver=true"
+# The proven Phase 5 release supplied these exact settings via Terraform CLI.
+# Avoid native PowerShell argument splitting entirely: serialize variables to a
+# temporary .tfvars.json file and pass ONE -var-file=... argument to Terraform.
+# A CLI var-file has higher precedence than any local terraform.tfvars file.
+$tfSettings = [ordered]@{
+    aws_account_id = $ExpectedAccount
+    aws_profile = $ProfileName
+    aws_region = $Region
+    shopify_shop_domain = $domain
+    shopify_client_credentials_secret_arn = $secretArn
+    shopify_webhook_secret_arn = $secretArn
+    phase5_lambda_image = $lambdaImage
+    phase5_generator_image = $generatorImage
+    phase5_projector_image = $projectorImage
+    phase5_lifecycle_image = $lifecycleImage
+    enable_redshift_warehouse = $true
+    enable_phase6_glue_silver = $true
+}
+$tfvarsPath = Join-Path ([System.IO.Path]::GetTempPath()) (
+    "phase6-glue-" + [guid]::NewGuid().ToString("N") + ".tfvars.json"
+)
+[System.IO.File]::WriteAllText(
+    $tfvarsPath,
+    ($tfSettings | ConvertTo-Json -Depth 5 -Compress),
+    (New-Object System.Text.UTF8Encoding($false))
 )
 
 Push-Location $TerraformDir
@@ -91,7 +98,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "terraform fmt check failed" }
     & terraform validate
     if ($LASTEXITCODE -ne 0) { throw "terraform validate failed" }
-    & terraform plan -input=false -out=phase6-glue-reviewed.tfplan @tfvars
+    & terraform plan "-var-file=$tfvarsPath" "-out=phase6-glue-reviewed.tfplan"
     if ($LASTEXITCODE -ne 0) { throw "terraform plan failed" }
 
     $planJson = (& terraform show -json .\phase6-glue-reviewed.tfplan | Out-String)
@@ -133,7 +140,10 @@ try {
     & terraform apply -input=false .\phase6-glue-reviewed.tfplan
     if ($LASTEXITCODE -ne 0) { throw "Terraform apply failed" }
 }
-finally { Pop-Location }
+finally {
+    Pop-Location
+    Remove-Item -LiteralPath $tfvarsPath -Force -ErrorAction SilentlyContinue
+}
 if (-not $Launch) {
     Write-Host "Glue job deployed. No job has run and no schedule was added."
     return
