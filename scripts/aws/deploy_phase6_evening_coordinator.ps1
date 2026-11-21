@@ -13,7 +13,7 @@
 .EXAMPLE
     .\scripts\aws\deploy_phase6_evening_coordinator.ps1
     Upload the verified ZIP and update the existing readiness schedule to cover
-    both 08:00 generation and 22:00 post-lifecycle processing slots (one poll every five minutes).
+    both 08:00 generation and 17:00 post-lifecycle processing slots (one poll every five minutes).
 #>
 [CmdletBinding()]
 param([switch]$ValidateOnly)
@@ -26,7 +26,7 @@ $AwsProfile = 'ecommerce-admin'
 $Region = 'eu-central-1'
 $FunctionName = 'ecommerce-phase6-evening-glue-coordinator-demo'
 $ScheduleName = 'ecommerce-phase6-evening-glue-demo'
-$DesiredExpression = 'cron(0/5 0-2,8-15,22-23 * * ? *)'
+$DesiredExpression = 'cron(0/5 0-2,8-15,17-23 * * ? *)'
 $Source = Join-Path $Root 'scripts\aws\phase6_evening_coordinator.py'
 $Temp = Join-Path ([IO.Path]::GetTempPath()) ('phase6-coordinator-' + [guid]::NewGuid().ToString('N'))
 
@@ -122,7 +122,7 @@ try {
         throw 'Unexpected existing coordinator schedule settings; update stopped'
     }
     $previousExpression = 'cron(0/5 16-21 * * ? *)'
-    if ($schedule.ScheduleExpression -notin @($previousExpression, 'cron(0/5 8-21 * * ? *)', $DesiredExpression)) {
+    if ($schedule.ScheduleExpression -notin @($previousExpression, 'cron(0/5 8-21 * * ? *)', 'cron(0/5 0-2,8-15,22-23 * * ? *)', $DesiredExpression)) {
         throw "Unexpected current readiness cadence: $($schedule.ScheduleExpression)"
     }
     if ($schedule.ScheduleExpression -ne $DesiredExpression) {
@@ -134,7 +134,7 @@ try {
             FlexibleTimeWindow         = $schedule.FlexibleTimeWindow
             Target                     = $schedule.Target
             State                      = $schedule.State
-            Description                = 'Readiness poll every 5 minutes 08-15 and 22-02 Berlin; nightly processing waits for 22:00 lifecycle, RDS projection and Glue.'
+            Description                = 'Readiness poll every 5 minutes 08-15 and 17-02 Berlin; end-of-day processing waits for 17:00 lifecycle, RDS projection and Glue.'
         }
         foreach ($optional in @('StartDate','EndDate','KmsKeyArn','ActionAfterCompletion')) {
             if ($schedule.PSObject.Properties.Name -contains $optional -and $null -ne $schedule.$optional) {
@@ -155,9 +155,9 @@ try {
     }
     $verifiedExpression = (& aws scheduler get-schedule --name $ScheduleName --profile $AwsProfile --region $Region --query ScheduleExpression --output text | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $verifiedExpression -ne $DesiredExpression) {
-        throw 'Coordinator Lambda deployed, but the 08:00/22:00 readiness schedule could not be verified'
+        throw 'Coordinator Lambda deployed, but the 08:00/17:00 readiness schedule could not be verified'
     }
-    Write-Host 'Verified order generation remains at 08:00 and 16:00; readiness poll covers 08:00-15:59 and 22:00-02:59 Europe/Berlin.'
+    Write-Host 'Verified order generation remains at 08:00 and 16:00; readiness poll covers 08:00-15:59 and 17:00-02:59 Europe/Berlin.'
 }
 finally {
     Pop-Location
