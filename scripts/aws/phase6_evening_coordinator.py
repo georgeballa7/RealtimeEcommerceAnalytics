@@ -22,7 +22,7 @@ CTRL_ID = "phase5-controller"
 # Keep the original afternoon key to preserve existing same-day run records.
 # The morning slot gets a distinct idempotency key in the SAME controller table.
 SLOT_IDS = {"morning": "phase6-morning", "afternoon": "phase6-evening"}
-SLOT_HOURS = {"morning": range(8, 16), "afternoon": (17, 18, 19, 20, 21, 22, 23, 0, 1, 2)}
+SLOT_HOURS = {"morning": range(8, 16), "afternoon": (16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2)}
 CLUSTER = "ecommerce-demo"
 RDS_ID = "ecommerce-postgres-dev"
 JOB = "ecommerce-phase6-shopify-silver-demo"
@@ -194,7 +194,7 @@ def processing_day(local, slot):
 
 def slot_for_time(local):
     """Which generator slot can advance in the current Berlin local time window?"""
-    return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
+    if local.hour == 16 and local.minute < 30:\n        return None  # Lifecycle has not started; never snapshot early.\n    return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
 
 
 def handler(event, context):
