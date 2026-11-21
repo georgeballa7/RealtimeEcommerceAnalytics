@@ -130,7 +130,7 @@ def publish_nightly_lifecycle(s3, bucket: str, day: str, stats: dict) -> None:
     """Publish last, after cancellation/refund mutations have settled.
 
     Both Shopify generation slots must have committed independently first.
-    The resulting marker permits a complete post-17:00 RDS/Glue snapshot.
+    The resulting marker permits a complete post-16:30 RDS/Glue snapshot.
     """
     from botocore.exceptions import ClientError
     for slot in ("morning", "afternoon"):
