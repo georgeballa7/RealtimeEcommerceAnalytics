@@ -10,7 +10,7 @@ Terraform continues managing the VPC, two public subnets, two private applicatio
 
 The on-demand NAT controller prewarms at **07:30** and **15:30 Europe/Berlin** for the 08:00/16:00 generators. The lifecycle runs at **16:30**; NAT is deleted after verified completion and quiet-period checks, potentially before the 18:00 operational target. The controller requires its DynamoDB lock, validates queue/worker/Glue activity before NAT deletion, and is intended to leave **no NAT** running outside required processing windows.
 
-At cutover, the old NAT was deleted, both application default routes were absent, and the reserved EIP was unassociated. A live Lambda invocation at 09:47 Berlin time returned `missed_prewarm_window`, the correct outcome outside the eligible creation interval. **The next 15:30 prewarm and resulting 16:00 Shopify connectivity must still be observed to validate the complete lifecycle.**
+The 21 November 15:30 prewarm, 16:00 Shopify generation and 22:00 historical end-of-day run completed successfully, followed by NAT deletion. **The new 16:30 lifecycle arrangement must still pass a complete 22 November operational cycle and safe-release check.**
 
 A CloudWatch alarm `ecommerce-demo-nat-lifecycle-errors` alerts the confirmed infrastructure SNS mailbox when the controller fails or the outbound routes are not active during the 07:50, 15:50 or 16:20 preflight checks. The readiness monitor does not itself create AWS resources; the lifecycle controller already handles idempotent provisioning and recovery.
 
