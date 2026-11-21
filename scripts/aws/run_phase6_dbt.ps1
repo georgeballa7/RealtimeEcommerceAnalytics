@@ -9,6 +9,8 @@ application subnets and the new dbt task SG; no public IP.
 param(
     [ValidateSet('AuthCheck', 'Build')]
     [string]$Action = 'AuthCheck',
+    [ValidateSet('Core', 'All')]
+    [string]$Scope = 'Core',
     [switch]$Execute
 )
 Set-StrictMode -Version Latest
@@ -61,13 +63,18 @@ try {
             throw "Another dbt task is already $status"
         }
     }
-    $Command = if ($Action -eq 'Build') {
+    if ($Action -ne 'Build' -and $Scope -ne 'Core') {
+        throw 'Scope All requires -Action Build'
+    }
+    $Command = if ($Action -eq 'Build' -and $Scope -eq 'All') {
+        @('--action', 'build', '--select', '*')
+    } elseif ($Action -eq 'Build') {
         @('--action','build','--select','+fct_refund_lines','+fct_cancellations')
     } else {
         @('--action','auth-check')
     }
     Write-Host "dbt task: $TaskDef"
-    Write-Host "Action: $Action"
+    Write-Host "Action: $Action; Scope: $Scope"
     Write-Host "Private subnet count: $($Subnets.Count)"
     Write-Host "Task security group: $SecurityGroup"
     Write-Host 'Public IP: DISABLED'
