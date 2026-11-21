@@ -35,6 +35,7 @@ TASK_IMAGES = {
     "aws_ecs_task_definition.consumer[0]": "consumer_image",
     "aws_ecs_task_definition.spark[0]": "spark_image",
     "aws_ecs_task_definition.customer_sync[0]": "customer_sync_image",
+    "aws_ecs_task_definition.db_bootstrap[0]": "db_bootstrap_image",
     "aws_ecs_task_definition.catalog_sync[0]": "catalog_sync_image",
     "aws_ecs_task_definition.phase5_projector[0]": "phase5_projector_image",
     "aws_ecs_task_definition.phase5_generator[0]": "phase5_generator_image",
