@@ -4,6 +4,11 @@ aws_account_id = "REPLACE_WITH_12_DIGIT_ACCOUNT_ID"
 aws_profile    = "ecommerce-admin"
 aws_region     = "eu-central-1"
 
+# Deployed mode: no permanent NAT. Lambda prewarms around the Shopify windows.
+nat_gateway_mode = "on_demand"
+nat_gateway_count = 1
+stage_nat_lifecycle = false
+
 # Review instance pricing, storage, backup and secret costs before apply.
 db_instance_class     = "db.t4g.micro"
 db_allocated_storage  = 20
@@ -13,3 +18,7 @@ db_allocated_storage  = 20
 # acm_certificate_arn = "arn:aws:acm:eu-central-1:ACCOUNT:certificate/..."
 # consumer_image      = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-consumer-demo@sha256:..."
 # spark_image         = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-spark-demo@sha256:..."
+
+# Existing deployment also has opt-in Redshift/Glue/dbt modules and pinned images.
+# DO NOT apply with this example alone: reconstruct actual opt-in flags and pinned
+# image digests from the protected remote state before running a full plan.

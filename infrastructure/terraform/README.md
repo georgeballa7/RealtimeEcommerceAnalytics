@@ -1,41 +1,47 @@
-# E-commerce AWS infrastructure (proposal)
+# RealtimeEcommerceAnalytics — live AWS infrastructure
 
-This Terraform configuration targets **eu-central-1** with a dedicated VPC, public HTTPS ALB, ECS/Fargate application tasks in private application subnets, a private RDS PostgreSQL instance, encrypted SQS queue and DLQ, private S3, and scheduled PySpark (single-container microbatch).
+**Environment:** `eu-central-1`, AWS account `825414820081`. Managed Terraform state is in the versioned S3 bucket `realtime-ecommerce-tfstate-eb4a631483cb` under `ecommerce/demo/terraform.tfstate` with native lockfiles. Do not commit state, local `backend.tf`, credentials, full `tfvars` or plan artifacts.
 
-Network: two public subnets with Internet Gateway, two application subnets and **one shared NAT Gateway by default in the development environment** (configurable to two for per-AZ egress resilience), and two isolated RDS subnets **without any internet default route**. Both private application subnet default routes use NAT 1 when `nat_gateway_count = 1`. This saves one NAT Gateway's standing hourly charge but introduces a single-AZ egress dependency and possible cross-AZ data-transfer charges. RDS accepts TCP 5432 only from the ECS application security group.
+## Deployed network (21 November 2026)
 
-## Readiness
+The former continuously running shared NAT Gateway (`nat-00f95208151412909`) was **deleted via Terraform** on 21 November 2026. Terraform also removed its two application subnet `0.0.0.0/0` routes, preserving both S3 Gateway Endpoint routes. The current desired `nat_gateway_mode` is **`on_demand`**.
 
-This is an **infrastructure foundation**. The repository still contains application scaffolding. The API is disabled until `api_image` and an issued regional ACM certificate are configured. The SQS consumer is disabled until `consumer_image` is supplied. Spark task definition is disabled until `spark_image` exists, and the schedule remains **DISABLED** even after the image is supplied. Images must be functional, tested, and use least-privilege application credentials and verified TLS. Production Shopify HMAC verification, idempotent transaction/outbox handling, database migrations, Redshift loads, and actual processing logic are not yet implemented.
+Terraform continues managing the VPC, two public subnets, two private application subnets, two isolated database subnets, the Internet Gateway, reserved public IPv4 EIP (`eipalloc-03c5d096fcb30e03a`), route tables, NAT lifecycle IAM, Lambda, CloudWatch log group and EventBridge Scheduler. **Terraform must not own the ephemeral NAT gateway or its private application default routes** in on-demand mode.
 
-## Review before applying
+The `ecommerce-phase6-nat-lifecycle-demo` Lambda is active, with the five-minute EventBridge Scheduler enabled. It prewarms at **07:30** and **15:30 Europe/Berlin** for the 08:00/16:00 Shopify generators and retains egress as needed for pending SQS/projector/Glue/dbt work and the scheduled **22:00 lifecycle**. The controller requires its DynamoDB lock, validates queue/worker/Glue activity before NAT deletion, and is intended to leave **no NAT** running outside required processing windows.
+
+At cutover, the old NAT was deleted, both application default routes were absent, and the reserved EIP was unassociated. A live Lambda invocation at 09:47 Berlin time returned `missed_prewarm_window`, the correct outcome outside the eligible creation interval. **The next 15:30 prewarm and resulting 16:00 Shopify connectivity must still be observed to validate the complete lifecycle.**
+
+A NAT Gateway incurs charges while provisioned; the *reserved public IPv4 address may still incur hourly charges when unattached*. NAT creation/deletion also has lead time, so a running ECS task cannot assume continuous internet egress outside the scheduled windows.
+
+## Additional deployed components
+
+- Private RDS PostgreSQL, ECS/Fargate tasks and ECR repositories, SQS/DLQ, DynamoDB, S3 landing and replay data, CloudWatch and the Phase 5 API/Lambda pipeline.
+- Glue Silver processing and Redshift Serverless warehouse, with a pinned dbt ECS task definition.
+- Phase 6 evening orchestration and Phase 7 dbt completion reconciler are deployed as **separate CloudFormation stacks**. They are not Terraform-managed; retain their checked-in CloudFormation templates. Do not import them into this Terraform root without a specific migration plan.
+- The RDS instance can be stopped operationally. Its temporary stopped state is not a desired Terraform resource deletion.
+
+## Planning and operational safeguards
+
+The `terraform.tfvars.example` captures only basic non-secret settings. **It is not sufficient for a full plan of the deployed account.** Many Phase 5/6 components are opt-in, and their existing task images must remain pinned to the live immutable ECR digests. Reconstruct those effective inputs from the protected state, including optional RDS bootstrap/customer sync/catalog sync, Phase 5 Lambda/generator, Redshift, Glue and dbt.
 
 ```powershell
 cd infrastructure/terraform
-Copy-Item terraform.tfvars.example terraform.tfvars
-# Set expected account ID, check region and estimated costs
-terraform init
+# Configure ignored backend.tf for the protected S3 backend; set AWS profile.
+terraform init -input=false
 terraform fmt -check
 terraform validate
-terraform plan -out=ecommerce.tfplan
+# Use the reviewed effective deployment tfvars, not the example alone.
+terraform plan -var-file=effective-deployment.tfvars.json -out=reviewed.tfplan
+# Inspect every change before using terraform apply reviewed.tfplan.
 ```
 
-Review the account, resource counts, region, security rules and spend before applying. NAT Gateways, public IPv4 addresses, RDS and potential ALB/Fargate tasks are billable even when idle. For an existing two-NAT deployment, a reviewed Terraform apply should replace application subnet 2's default route with NAT 1 and remove NAT 2 and its allocated public IPv4 address; do not delete NAT manually before route migration. AWS Budget alerts are not spend limits. Terraform state contains sensitive information: keep it out of Git and configure protected state and locking before collaborative or CI-managed apply.
+Never run a full `terraform apply` with default/partial image variables against the live deployment. Check for changes to existing task definitions, RDS, Redshift, VPC, Shopify schedules, Glue jobs and CloudFormation-managed resources; stop if not expected.
 
-## Reliability and security
+The previous `scripts/aws/plan_phase7_nat_cutover.ps1` and `apply_phase7_nat_cutover.ps1` were **one-time, static-to-on-demand migration tools**. They are no longer appropriate after the completed cutover and must not be re-run.
 
-The AWS deployment uses SQS standard queue plus DLQ and S3 as the durable replay source. Consumer code must write idempotently to S3 *before* acknowledging SQS. Spark runs scheduled microbatches using PySpark local mode, **not** continuous distributed Structured Streaming. Add watermarking, non-overlap protection, observable metrics and alarms before enabling automated runs. A real customer deployment would require capacity testing, Multi-AZ RDS, multiple healthy API tasks, dedicated app/database roles, WAF and recovery validation. Never use the RDS master account for the API. RDS deletion protection is enabled and a final snapshot is configured.
+To roll back in a verified quiet window, set `nat_gateway_mode = "static"` and `stage_nat_lifecycle = true` with all other **deployed** input variables pinned, review the exact Terraform plan, and ensure the controller is disabled while the Terraform-owned static NAT and routes are restored. Preserve the original EIP.
 
-Nothing is automatically deployed from this PR; Redshift, completed apps, Shopify integration and Power BI are separate outstanding implementation work.
+## Cost control and security
 
-## Terraform state and operational safeguards
-
-Provision the independent S3 remote-state bucket from `../bootstrap/` first. Then copy `backend.tf.example` to the ignored local `backend.tf`, replace the placeholder and reinitialize Terraform. The bootstrap root retains a securely backed-up local state. Native S3 lockfiles require Terraform 1.10 or later; never commit state or plan artifacts.
-
-The application database secret is created **without a secret value**. Populate it securely and create a matching least-privilege PostgreSQL user before enabling API tasks; the API execution role can only retrieve this secret. CloudWatch alarms monitor SQS DLQ messages, event backlog age and RDS CPU and send to an SNS topic; the configured mailbox is `george.data.alerts@gmail.com` and the recipient **must confirm** the AWS SNS subscription email before notifications arrive. Confirm CloudWatch RDS CPU metrics after applying the alarm-dimension fix. Finish integration testing, broader monitoring and IAM review before deployment.
-
-## Cost-control decision (November 2026)
-
-The personal spending envelope is **$75 per month including a $34 AWS Skill Builder subscription charged directly to a bank account**. AWS Budgets **cannot include that separate subscription**. The equivalent AWS-account spending ceiling is **$41 per month**, and an AWS Budget alert is a notification, not a hard stop. Review actual usage and remaining credits in Billing; Cost Explorer can lag and promotional credits can make costs appear negligible.
-
-Changing this repository **does not modify running NAT Gateways** until Terraform is applied from the protected state root. Before apply, verify the plan shows removal of only NAT Gateway index 1, its Elastic IP index 1 and a route update for application route table index 1; ensure the RDS database, S3, and private subnet layout are preserved. After apply, inspect both application routes and test a one-off ECS task's outbound Shopify connectivity. Retain the S3 Gateway Endpoint to avoid unnecessary NAT S3 traffic.
+Keep the AWS-account budget alerts separate from any third-party training subscription charges. Budgets are notifications, not hard spending limits; monitor EIP, NAT hours, Redshift compute/storage, RDS, Fargate, logs and data transfer. S3 Gateway Endpoint access must remain private and avoid unnecessary NAT data charges. The project is a cost-controlled learning environment, not a production high-availability configuration; review Multi-AZ, monitoring, alerting, security, and operational recovery before production use.

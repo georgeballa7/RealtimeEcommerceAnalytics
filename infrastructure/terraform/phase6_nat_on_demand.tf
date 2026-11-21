@@ -1,7 +1,7 @@
-# OPTIONAL on-demand NAT. Static NAT is still the default.
-# Terraform owns EIP/subnet/route tables, but NOT ephemeral NAT and default
-# routes in dynamic mode. The lifecycle Lambda owns those runtime resources.
-# An opt-in change requires a reviewed Terraform plan during an idle window.
+# LIVE (21 Nov 2026): Terraform manages the on-demand NAT controller,
+# reserved EIP, and application route tables. Only the lifecycle Lambda owns
+# ephemeral NAT Gateways and their runtime default routes. Static mode is an
+# explicit, plan-reviewed rollback option; never recreate routes by hand.
 data "archive_file" "phase6_nat_lifecycle" {
   count       = local.nat_lifecycle_count
   type        = "zip"
