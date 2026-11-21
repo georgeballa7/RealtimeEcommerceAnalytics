@@ -101,7 +101,14 @@ try {
         Assert-Exit 'Terraform init'
         & terraform show -json | Out-File -LiteralPath $StateJson -Encoding utf8
         Assert-Exit 'Read current Terraform state JSON'
-        & python -X utf8 $VarsBuilder --state $StateJson --output $VarsFile --account $AccountId --pinned-image $PinnedImage
+        # Native Windows PowerShell can drop an empty final argument.
+        # During foundation stage, omit --pinned-image entirely and let
+        # argparse use its safe empty-string default.
+        $builderArgs = @('-X', 'utf8', $VarsBuilder, '--state', $StateJson, '--output', $VarsFile, '--account', $AccountId)
+        if ($PinnedImage -ne '') {
+            $builderArgs += @('--pinned-image', $PinnedImage)
+        }
+        & python @builderArgs
         Assert-Exit 'Preserve existing Terraform resources and digest-pinned images'
         $saved = Get-Content -LiteralPath $VarsFile -Raw | ConvertFrom-Json
         foreach ($match in @(
