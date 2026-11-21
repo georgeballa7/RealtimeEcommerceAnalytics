@@ -2,7 +2,7 @@
 # Requires the existing phase5_generator.tf resources in the GitHub repository.
 # Generator container uses Dockerfile.phase5-generator and slot runner.
 variable "enable_phase5_legacy_lifecycle_schedule" {
-  description = "Enable standalone 22:00 nightly lifecycle for the development store. Keep enabled until an explicitly reviewed replacement is operational."
+  description = "Enable standalone 17:00 end-of-day lifecycle for the development store. Keep enabled until an explicitly reviewed replacement is operational."
   type        = bool
   default     = true
 }
@@ -190,7 +190,7 @@ resource "aws_scheduler_schedule" "phase5_lifecycle" {
   count = var.phase5_lifecycle_image != "" && var.enable_phase5_legacy_lifecycle_schedule ? 1 : 0
   name = "ecommerce-${var.environment}-phase5-lifecycle"
   state = "ENABLED"
-  schedule_expression = "cron(0 22 * * ? *)"
+  schedule_expression = "cron(0 17 * * ? *)"
   schedule_expression_timezone = "Europe/Berlin"
   flexible_time_window { mode = "OFF" }
   target {
