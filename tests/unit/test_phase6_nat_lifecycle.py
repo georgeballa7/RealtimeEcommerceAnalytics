@@ -249,10 +249,10 @@ def test_new_day_open_slot_blocks_old_gateway_release(monkeypatch):
         if Key["id"] in data else {}
     ec2 = Mock()
     monkeypatch.setattr(mod, "inactive_workloads", lambda *a, **kw: None)
-    response = mod.release_if_idle(ec2, {}, {
-        "get_item": table.get_item,
-        "update_item": table.update_item,
-    }, {"route_tables": ["rtb-a", "rtb-b"]}, nat, local)
+    response = mod.release_if_idle(
+        ec2, {}, table, {"route_tables": ["rtb-a", "rtb-b"]},
+        nat, local,
+    )
     assert response["nat_lifecycle"] == "awaiting_slot_completion"
     assert response["day"] == "2026-11-21"
     assert response["slot"] == "morning"
