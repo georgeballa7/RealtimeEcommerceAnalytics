@@ -126,6 +126,27 @@ def snapshot_vars(state: dict, account: str) -> dict:
         if address in items:
             result[variable] = image_from_task(items[address])
 
+    dbt_task = items.get("aws_ecs_task_definition.phase6_dbt[0]")
+    if dbt_task:
+        dbt_defs = json.loads(dbt_task["container_definitions"])
+        if len(dbt_defs) != 1:
+            raise UnsafePlan("Expected one dbt container in state")
+        dbt_env = {
+            item.get("name"): item.get("value")
+            for item in dbt_defs[0].get("environment", [])
+        }
+        dbt_host = dbt_env.get("REDSHIFT_HOST", "")
+        if re.fullmatch(
+            r"vpce-[a-z0-9-]+[.]vpce-svc-[a-z0-9-]+[.]eu-central-1[.]vpce[.]amazonaws[.]com",
+            dbt_host,
+        ):
+            result["phase6_dbt_private_host"] = dbt_host
+        elif dbt_host == "ecommerce-analytics-demo.825414820081.eu-central-1.redshift-serverless.amazonaws.com":
+            # Preserve pre-fix task state verbatim during NAT-only cutover.
+            result["phase6_dbt_private_host"] = ""
+        else:
+            raise UnsafePlan("Unrecognized dbt Redshift hostname in Terraform state")
+
     # Preserve all three independently deployed Phase 5 Lambda image pointers;
     # a mismatch is operational drift, not something a NAT plan may "repair".
     lambdas = [
