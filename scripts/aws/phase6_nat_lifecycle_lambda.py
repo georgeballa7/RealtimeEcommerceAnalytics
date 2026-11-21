@@ -364,6 +364,9 @@ def acquire_lock(table, now: int, owner: str):
 
 def handler(event, context):
     event = event if isinstance(event, dict) else {}
+    # A staged controller must never create/delete NAT or routes when static NAT is live.
+    if os.environ.get("NAT_LIFECYCLE_ACTIVE", "false").lower() != "true":
+        return log("staged_disabled")
     settings = config()
     now = datetime.now(timezone.utc)
     local = now.astimezone(BERLIN)

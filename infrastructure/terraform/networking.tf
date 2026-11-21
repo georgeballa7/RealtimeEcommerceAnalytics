@@ -12,8 +12,15 @@ variable "nat_gateway_mode" {
   }
 }
 
+variable "stage_nat_lifecycle" {
+  type = bool
+  default = false
+  description = "Stage the on-demand NAT controller with its schedule disabled while retaining the static NAT. Enable deliberately after plan review."
+}
+
 locals {
   static_nat_count = var.nat_gateway_mode == "static" ? var.nat_gateway_count : 0
+  nat_lifecycle_count = var.nat_gateway_mode == "on_demand" || var.stage_nat_lifecycle ? 1 : 0
 }
 
 data "aws_availability_zones" "available" { state = "available" }

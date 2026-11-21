@@ -3,20 +3,20 @@
 # routes in dynamic mode. The lifecycle Lambda owns those runtime resources.
 # An opt-in change requires a reviewed Terraform plan during an idle window.
 data "archive_file" "phase6_nat_lifecycle" {
-  count       = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count       = local.nat_lifecycle_count
   type        = "zip"
   source_file = "${path.module}/../../scripts/aws/phase6_nat_lifecycle_lambda.py"
   output_path = "${path.module}/.terraform/phase6_nat_lifecycle.zip"
 }
 
 resource "aws_cloudwatch_log_group" "phase6_nat_lifecycle" {
-  count             = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count             = local.nat_lifecycle_count
   name              = "/aws/lambda/ecommerce-phase6-nat-lifecycle-${var.environment}"
   retention_in_days = 14
 }
 
 resource "aws_iam_role" "phase6_nat_lifecycle" {
-  count = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count = local.nat_lifecycle_count
   name  = "ecommerce-phase6-nat-lifecycle-${var.environment}"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -29,13 +29,13 @@ resource "aws_iam_role" "phase6_nat_lifecycle" {
 }
 
 resource "aws_iam_role_policy_attachment" "phase6_nat_logs" {
-  count      = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count      = local.nat_lifecycle_count
   role       = aws_iam_role.phase6_nat_lifecycle[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 resource "aws_iam_role_policy" "phase6_nat_lifecycle" {
-  count = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count = local.nat_lifecycle_count
   name  = "control-only-ephemeral-nat-and-verified-outbound-work"
   role  = aws_iam_role.phase6_nat_lifecycle[0].id
   policy = jsonencode({
@@ -102,7 +102,7 @@ resource "aws_iam_role_policy" "phase6_nat_lifecycle" {
 }
 
 resource "aws_lambda_function" "phase6_nat_lifecycle" {
-  count            = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count            = local.nat_lifecycle_count
   function_name    = "ecommerce-phase6-nat-lifecycle-${var.environment}"
   filename         = data.archive_file.phase6_nat_lifecycle[0].output_path
   source_code_hash = data.archive_file.phase6_nat_lifecycle[0].output_base64sha256
@@ -114,6 +114,7 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
 
   environment {
     variables = {
+      NAT_LIFECYCLE_ACTIVE         = tostring(var.nat_gateway_mode == "on_demand")
       AWS_REGION                   = var.aws_region
       NAT_ALLOCATION_ID            = aws_eip.nat[0].id
       NAT_PUBLIC_SUBNET_ID         = aws_subnet.public[0].id
@@ -146,7 +147,7 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
 # Existing 08:00/16:00 schedules remain; standalone 18:00 is controlled by
 # enable_phase5_legacy_lifecycle_schedule and disabled only at verified cutover.
 resource "aws_iam_role" "phase6_nat_schedule" {
-  count = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count = local.nat_lifecycle_count
   name  = "ecommerce-phase6-nat-scheduler-${var.environment}"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -159,7 +160,7 @@ resource "aws_iam_role" "phase6_nat_schedule" {
 }
 
 resource "aws_iam_role_policy" "phase6_nat_schedule" {
-  count = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count = local.nat_lifecycle_count
   name  = "invoke-only-nat-lifecycle-lambda"
   role  = aws_iam_role.phase6_nat_schedule[0].id
   policy = jsonencode({
@@ -173,10 +174,10 @@ resource "aws_iam_role_policy" "phase6_nat_schedule" {
 }
 
 resource "aws_scheduler_schedule" "phase6_nat_lifecycle" {
-  count               = var.nat_gateway_mode == "on_demand" ? 1 : 0
+  count               = local.nat_lifecycle_count
   name                = "ecommerce-phase6-nat-lifecycle-${var.environment}"
   schedule_expression = "rate(5 minutes)"
-  state               = "ENABLED"
+  state               = var.nat_gateway_mode == "on_demand" ? "ENABLED" : "DISABLED"
 
   flexible_time_window { mode = "OFF" }
 
@@ -198,5 +199,5 @@ output "nat_gateway_mode" {
 }
 
 output "phase6_nat_lifecycle_function" {
-  value = var.nat_gateway_mode == "on_demand" ? aws_lambda_function.phase6_nat_lifecycle[0].function_name : null
+  value = local.nat_lifecycle_count == 1 ? aws_lambda_function.phase6_nat_lifecycle[0].function_name : null
 }
