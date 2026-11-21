@@ -202,9 +202,14 @@ def create_managed_nat(ec2, settings, day, slot):
     return log("created", nat_id=nat["NatGatewayId"], slot=slot, state=nat["State"])
 
 
-def inactive_workloads(clients, settings, controller, local, slot):
+def inactive_workloads(clients, settings, controller, local, slot, *, day=None):
     """Fail closed: only delete NAT when ALL outbound-workload checks pass."""
-    if not can_consider_release(local, slot):
+    window_open = can_consider_release(local, slot)
+    # A previous day's morning can be released after midnight, once its own
+    # completion and all live workloads have been checked.
+    if day and day < local.date().isoformat() and slot == "morning":
+        window_open = True
+    if not window_open:
         return "scheduled_workload_window"
     if controller.get("worker_task_arn") or controller.get("error_hold"):
         return "projector_not_idle"
@@ -253,39 +258,58 @@ def active_slot_finished(table, day: str, slot: str, local: datetime):
     if status.get("day") == day and status.get("phase") in TERMINAL_PHASES:
         return True
     # Only a stale *idle* pipeline may be shut down after a missed/failed run.
-    # The calling path has already checked every active workload and backlog.
+    # Use the original slot date after midnight, not today's unrelated slot.
+    # The calling path checks every active workload and backlog independently.
+    today = local.date().isoformat()
+    if day < today:
+        return slot == "morning" or local.hour >= 3
+    if day > today:
+        return False
     return is_stale(local, slot)
 
 
 def release_if_idle(ec2, clients, table, settings, nat, local):
-    day = local.date().isoformat()
-    nat_slot = next(
-        (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Slot"), None
-    )
+    tags = {tag["Key"]: tag["Value"] for tag in nat.get("Tags", [])}
+    nat_slot = tags.get("Slot")
+    nat_day = tags.get("Day")
     if nat_slot not in ("morning", "afternoon"):
         raise RuntimeError("On-demand NAT has unexpected slot tag")
-    # Morning may still be processing at the afternoon boundary. Never tear
-    # it down until its own record and the newer slot are settled.
-    slot_records = {
-        slot: load_record(table, day, slot)
-        for slot in ("morning", "afternoon")
-    }
-    relevant = [slot for slot, item in slot_records.items() if item and item["phase"] != "closed"]
+    try:
+        if not nat_day or datetime.fromisoformat(nat_day).date().isoformat() != nat_day:
+            raise ValueError("invalid day")
+    except ValueError as exc:
+        raise RuntimeError("On-demand NAT has unexpected Day tag") from exc
+    current_day = local.date().isoformat()
+    if nat_day > current_day:
+        raise RuntimeError("NAT Day tag is unexpectedly in the future")
+
+    # A single gateway can cover morning + afternoon and may stay alive after
+    # midnight. Always evaluate both the creation-day and today's open slots,
+    # never infer yesterday's completion state from today's empty records.
+    relevant = []
+    for day in sorted({nat_day, current_day}):
+        for slot in ("morning", "afternoon"):
+            item = load_record(table, day, slot)
+            if item and item.get("phase") != "closed":
+                relevant.append((day, slot))
     if not relevant:
-        relevant = [nat_slot]
+        relevant = [(nat_day, nat_slot)]
     controller = table.get_item(
         Key={"id": "phase5-controller"}, ConsistentRead=True
     ).get("Item", {})
-    for slot in relevant:
+    for day, slot in relevant:
         if not active_slot_finished(table, day, slot, local):
-            return log("awaiting_slot_completion", slot=slot, nat_id=nat["NatGatewayId"])
-        reason = inactive_workloads(clients, settings, controller, local, slot)
+            return log("awaiting_slot_completion", day=day, slot=slot,
+                       nat_id=nat["NatGatewayId"])
+        reason = inactive_workloads(clients, settings, controller, local, slot,
+                                    day=day)
         if reason:
-            return log("retained", reason=reason, slot=slot, nat_id=nat["NatGatewayId"])
+            return log("retained", reason=reason, day=day, slot=slot,
+                       nat_id=nat["NatGatewayId"])
     nat_id = nat["NatGatewayId"]
     remove_default_routes(ec2, settings["route_tables"], nat_id)
     ec2.delete_nat_gateway(NatGatewayId=nat_id)
-    for slot in relevant:
+    for day, slot in relevant:
         table.update_item(
             Key={"id": slot_key(day, slot)},
             UpdateExpression="SET #phase=:closed",
@@ -339,6 +363,11 @@ def handler(event, context):
         if nat and nat["State"] == "pending":
             return log("awaiting_nat", nat_id=nat["NatGatewayId"])
         if nat and nat["State"] == "available":
+            # A morning NAT may still be available when afternoon prewarming
+            # begins. Claim the afternoon record BEFORE considering deletion.
+            # Otherwise the controller can tear down the gateway at 15:30.
+            if slot and can_begin_new_warm(local, slot):
+                record_warm(table, today, slot)
             ensure_default_routes(ec2, settings["route_tables"], nat["NatGatewayId"])
             return release_if_idle(ec2, clients, table, settings, nat, local)
         if slot is None:
