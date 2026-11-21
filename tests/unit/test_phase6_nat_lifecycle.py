@@ -226,6 +226,7 @@ def test_natural_afternoon_handoff_records_slot_before_nat_release(monkeypatch):
         return {"nat_lifecycle": "retained"}
     monkeypatch.setattr(mod, "release_if_idle", fake_release)
 
+    monkeypatch.setenv("NAT_LIFECYCLE_ACTIVE", "true")
     result = mod.handler({}, None)
     assert result == {"nat_lifecycle": "retained"}
     assert recorded == [
