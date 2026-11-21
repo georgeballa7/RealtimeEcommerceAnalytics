@@ -27,7 +27,7 @@ try {
     if ($Account -ne $AccountId) { throw 'Incorrect AWS account' }
     $Branch = (& git branch --show-current | Out-String).Trim()
     Assert-Exit 'Git branch'
-    if ($Branch -ne 'feature/redshift-warehouse-dbt-churn') { throw "Unexpected branch: $Branch" }
+    if ($Branch -ne 'feature/dbt-analytics-churn-model') { throw "Unexpected branch: $Branch" }
     $Commit = (& git rev-parse --short=12 HEAD | Out-String).Trim()
     Assert-Exit 'Git commit'
     $Tag = "dbt-$Commit"
