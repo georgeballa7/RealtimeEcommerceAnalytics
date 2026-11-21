@@ -306,6 +306,27 @@ def release_if_idle(ec2, clients, table, settings, nat, local):
         if not active_slot_finished(table, day, slot, local):
             return log("awaiting_slot_completion", day=day, slot=slot,
                        nat_id=nat["NatGatewayId"])
+        # After Redshift warehouse acknowledgement, retain NAT while the
+        # corresponding completion-triggered dbt build is pending/running.
+        # Even if the event notification is late, the DynamoDB marker is
+        # authoritative. A stale idle slot may release NAT to cap costs;
+        # active ECS tasks are independently checked immediately below.
+        coordinator_id = "phase6-morning" if slot == "morning" else "phase6-evening"
+        warehouse = table.get_item(
+            Key={"id": coordinator_id}, ConsistentRead=True
+        ).get("Item", {})
+        if (warehouse.get("day") == day
+                and warehouse.get("phase") == "completed"
+                and warehouse.get("warehouse_verified_at")):
+            dbt_slot = "morning" if slot == "morning" else "evening"
+            batch = warehouse.get("batch_id", "")
+            dbt = table.get_item(
+                Key={"id": f"phase7-dbt:{dbt_slot}:{batch}"}, ConsistentRead=True
+            ).get("Item", {})
+            if dbt.get("state") != "succeeded" and not slot_is_stale(local, day, slot):
+                return log("awaiting_verified_dbt_build", day=day, slot=slot,
+                           dbt_state=dbt.get("state", "not_started"),
+                           nat_id=nat["NatGatewayId"])
         reason = inactive_workloads(clients, settings, controller, local, slot,
                                     day=day)
         if reason:
