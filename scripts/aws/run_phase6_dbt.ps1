@@ -105,11 +105,26 @@ try {
     }
     $Arn = $result.tasks[0].taskArn
     Write-Host "Started $Action dbt task: $Arn"
-    & aws ecs wait tasks-stopped --cluster $Cluster --tasks $Arn --profile $Profile --region $Region
-    Assert-Exit 'Wait for dbt task'
-    $stoppedJson = & aws ecs describe-tasks --cluster $Cluster --tasks $Arn --profile $Profile --region $Region --output json
-    Assert-Exit 'Inspect stopped dbt task'
-    $task = ($stoppedJson | Out-String | ConvertFrom-Json).tasks[0]
+    # ecs wait tasks-stopped has a comparatively short default waiter duration.
+    # Building all marts/tests may exceed it, particularly on a cold Redshift
+    # Serverless workgroup. Poll for at most 55 minutes, matching the Python
+    # dbt runner's 3300-second execution bound, then fail without relaunching.
+    $task = $null
+    for ($attempt = 0; $attempt -lt 165; $attempt++) {
+        $taskJson = & aws ecs describe-tasks --cluster $Cluster --tasks $Arn --profile $Profile --region $Region --output json
+        Assert-Exit 'Poll dbt ECS task status'
+        $rows = @(($taskJson | Out-String | ConvertFrom-Json).tasks)
+        if ($rows.Count -ne 1) { throw 'Expected exactly one ECS dbt task when polling' }
+        $task = $rows[0]
+        if ($task.lastStatus -eq 'STOPPED') { break }
+        if ($task.lastStatus -notin @('PROVISIONING','PENDING','ACTIVATING','RUNNING','DEACTIVATING','STOPPING')) {
+            throw "Unexpected dbt ECS task state: $($task.lastStatus)"
+        }
+        Start-Sleep -Seconds 20
+    }
+    if ($null -eq $task -or $task.lastStatus -ne 'STOPPED') {
+        throw "dbt ECS task has not stopped within 55 minutes: $Arn. Do not launch a duplicate task."
+    }
     $container = @($task.containers | Where-Object { $_.name -eq 'phase6-dbt' })
     if ($container.Count -ne 1 -or $null -eq $container[0].exitCode -or
         [int]$container[0].exitCode -ne 0) {
