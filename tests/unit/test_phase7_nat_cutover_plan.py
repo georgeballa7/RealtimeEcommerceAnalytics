@@ -220,3 +220,33 @@ def test_state_helpers_work_from_terraform_directory_as_native_cli(tmp_path):
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["nat_gateway_mode"] == "static"
     assert payload["enable_phase6_dbt_runner"] is True
+
+def test_nat_cutover_apply_is_idle_only_and_exactly_plan_guarded():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    apply_script = (root / "scripts/aws/apply_phase7_nat_cutover.ps1").read_text()
+    assert "param([switch]$Apply)" in apply_script
+    assert "if (-not $Apply)" in apply_script
+    assert "$Guard review --plan $planJson" in apply_script
+    assert "& terraform apply -input=false $planPath" in apply_script
+    assert apply_script.index("$Guard review --plan $planJson") < apply_script.index(
+        "& terraform apply -input=false $planPath"
+    )
+    assert "CUTOVER-NAT" in apply_script
+    assert "Refusing NAT cutover: ECS" in apply_script
+    assert "Refusing NAT cutover: Glue" in apply_script
+    assert "Refusing NAT cutover: SQS" in apply_script
+    assert "warehouse batch is not verified completed" in apply_script
+    assert "Refusing NAT cutover: dbt" in apply_script
+    assert "Redshift loader lease active" in apply_script
+    assert "10:00–12:30" in apply_script
+
+
+def test_nat_cutover_allows_only_known_provider_data_reads():
+    data = valid_plan()
+    data["resource_changes"].append({
+        "address": "data.aws_availability_zones.available",
+        "mode": "data",
+        "change": {"actions": ["read"]},
+    })
+    assert plan.review_plan(data)["other_changes"] == 0
