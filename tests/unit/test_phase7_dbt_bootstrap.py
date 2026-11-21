@@ -123,3 +123,24 @@ def test_dbt_launcher_has_no_duplicate_body_or_unbalanced_tail():
     assert "if ($Subnets.Count -ne 2 -or" in launch
     assert "Where-Object { $_ -notmatch '^subnet-[0-9a-f]{8,}$' }" in launch
     assert len(launch.splitlines()) < 180
+
+@pytest.mark.parametrize("actions", [["delete", "create"], ["create", "delete"]])
+def test_dbt_image_revision_allows_only_dbt_ecs_definition_replace(actions):
+    plan = changes(guard.TASK)
+    plan["resource_changes"][0]["change"]["actions"] = actions
+    outcome = guard.validate(plan, "task")
+    assert outcome["replace_count"] == 1
+    assert outcome["create_count"] == 1
+    assert outcome["delete_count"] == 1
+    assert outcome["update_count"] == 0
+
+
+def test_dbt_image_revision_rejects_other_replacements():
+    plan = changes(guard.TASK)
+    plan["resource_changes"][0]["change"]["actions"] = ["delete", "create"]
+    plan["resource_changes"].append({
+        "address": "aws_ecs_task_definition.phase5_generator[0]",
+        "mode": "managed", "change": {"actions": ["delete", "create"]}
+    })
+    with pytest.raises(guard.UnsafeDbtPlan):
+        guard.validate(plan, "task")
