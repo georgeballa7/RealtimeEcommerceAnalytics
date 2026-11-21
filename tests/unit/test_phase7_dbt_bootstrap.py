@@ -98,3 +98,14 @@ def test_phase7_dbt_foundation_omits_empty_optional_image_argument():
     assert "$builderArgs += @('--pinned-image', $PinnedImage)" in deploy
     assert "& python @builderArgs" in deploy
     assert "--account $AccountId --pinned-image $PinnedImage" not in deploy
+
+
+def test_ecs_runner_decodes_subnet_json_as_flat_strings_for_windows_powershell():
+    """Prevent 2 subnet IDs being wrapped as a single JSON-array pipeline object."""
+    launch = (ROOT / "scripts/aws/run_phase6_dbt.ps1").read_text()
+    assert "ConvertFrom-Json -InputObject (($SubnetsJson | Out-String).Trim())" in launch
+    assert "[string[]]$Subnets = $SubnetValues" in launch
+    assert "$SubnetValues -isnot [System.Array]" in launch
+    assert "$Subnets | Select-Object -Unique" in launch
+    assert "subnets = $Subnets" in launch
+    assert "@($SubnetsJson | ConvertFrom-Json)" not in launch
