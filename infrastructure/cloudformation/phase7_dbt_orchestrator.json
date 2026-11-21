@@ -18,7 +18,7 @@
         "Environment": {
           "Variables": {
             "DBT_LAUNCH_ENABLED": "true",
-            "DBT_TASK_DEFINITION": "arn:aws:ecs:eu-central-1:825414820081:task-definition/ecommerce-phase6-dbt-demo:3"
+            "DBT_TASK_DEFINITION": "arn:aws:ecs:eu-central-1:825414820081:task-definition/ecommerce-phase6-dbt-demo:4"
           }
         }
       }
