@@ -73,5 +73,10 @@ def test_release_scripts_use_phase7_branch_and_exact_plan_gate():
     assert "'--action', 'build', '--select', '*'" in launch
     assert "if (-not $Execute)" in launch
     assert "assignPublicIp = 'DISABLED'" in launch
+    assert "for ($attempt = 0; $attempt -lt 165; $attempt++)" in launch
+    assert "dbt ECS task has not stopped within 55 minutes" in launch
+    assert "tasks-stopped" not in launch
+    assert "phase7_dbt_release_vars.py" in deploy
+    assert "Preserve existing Terraform resources" in deploy
 
 
