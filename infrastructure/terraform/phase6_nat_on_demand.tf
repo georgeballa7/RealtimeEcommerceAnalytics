@@ -115,7 +115,7 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
   environment {
     variables = {
       NAT_LIFECYCLE_ACTIVE         = tostring(var.nat_gateway_mode == "on_demand")
-      AWS_REGION                   = var.aws_region
+      # AWS_REGION is set automatically by Lambda and is a reserved environment key.
       NAT_ALLOCATION_ID            = aws_eip.nat[0].id
       NAT_PUBLIC_SUBNET_ID         = aws_subnet.public[0].id
       NAT_VPC_ID                   = aws_vpc.ecommerce.id
