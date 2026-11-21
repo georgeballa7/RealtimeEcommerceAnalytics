@@ -32,7 +32,7 @@ terraform init -input=false
 terraform fmt -check
 terraform validate
 # Use the reviewed effective deployment tfvars, not the example alone.
-terraform plan -var-file=effective-deployment.tfvars.json -out=reviewed.tfplan
+terraform plan -var-file=effective-deployment.auto.tfvars.json -out=reviewed.tfplan
 # Inspect every change before using terraform apply reviewed.tfplan.
 ```
 
@@ -45,3 +45,7 @@ To roll back in a verified quiet window, set `nat_gateway_mode = "static"` and `
 ## Cost control and security
 
 Keep the AWS-account budget alerts separate from any third-party training subscription charges. Budgets are notifications, not hard spending limits; monitor EIP, NAT hours, Redshift compute/storage, RDS, Fargate, logs and data transfer. S3 Gateway Endpoint access must remain private and avoid unnecessary NAT data charges. The project is a cost-controlled learning environment, not a production high-availability configuration; review Multi-AZ, monitoring, alerting, security, and operational recovery before production use.
+
+### Current-state variable reconstruction
+
+The `scripts/aws/phase7_nat_cutover_plan.py snapshot` helper now supports both the historical static deployment and today's on-demand state. It produces the same pinned image/feature-flag inputs for future full plans while refusing partially migrated NAT states. Run it on `terraform show -json` output in a secure temporary directory; write the resulting file to an ignored `*.auto.tfvars.json` path. Treat the output as sensitive deployment configuration, never commit it, and check current AWS values before applying.

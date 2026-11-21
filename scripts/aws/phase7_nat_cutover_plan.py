@@ -89,16 +89,27 @@ def snapshot_vars(state: dict, account: str) -> dict:
     by review_plan, never silently applied.
     """
     items = index_resources(state)
-    required = {STATIC_NAT, *STATIC_ROUTES}
-    if not required.issubset(items):
-        raise UnsafePlan("Expected a single deployed static NAT and both Terraform-owned default routes")
-    nats = [x for x in items if x.startswith("aws_nat_gateway.ecommerce[")]
-    eips = [x for x in items if x.startswith("aws_eip.nat[")]
-    if nats != [STATIC_NAT] or eips != ["aws_eip.nat[0]"]:
-        raise UnsafePlan("Expected exactly one Terraform-managed NAT and reserved EIP")
-    nat_id = items[STATIC_NAT].get("id")
-    if not nat_id or any(items[x].get("nat_gateway_id") != nat_id for x in STATIC_ROUTES):
-        raise UnsafePlan("Static NAT route identifiers differ from state")
+    # Before cutover, Terraform tracked one static NAT and both default routes.
+    # After cutover, those runtime resources are intentionally ABSENT from state;
+    # the lifecycle Lambda and Scheduler are Terraform-managed instead.
+    nats = sorted(x for x in items if x.startswith("aws_nat_gateway.ecommerce["))
+    routes = sorted(x for x in items if x.startswith("aws_route.application["))
+    eips = sorted(x for x in items if x.startswith("aws_eip.nat["))
+    if eips != ["aws_eip.nat[0]"]:
+        raise UnsafePlan("Expected exactly one Terraform-managed reserved NAT EIP")
+    if nats == [STATIC_NAT] and routes == sorted(STATIC_ROUTES):
+        nat_id = items[STATIC_NAT].get("id")
+        if not nat_id or any(items[x].get("nat_gateway_id") != nat_id for x in STATIC_ROUTES):
+            raise UnsafePlan("Static NAT route identifiers differ from state")
+    elif not nats and not routes:
+        controller = {
+            "aws_lambda_function.phase6_nat_lifecycle[0]",
+            "aws_scheduler_schedule.phase6_nat_lifecycle[0]",
+        }
+        if not controller.issubset(items):
+            raise UnsafePlan("On-demand NAT mode requires deployed lifecycle Lambda and Scheduler")
+    else:
+        raise UnsafePlan("Inconsistent static NAT routes or on-demand NAT deployment")
     if "aws_vpc_endpoint.s3" not in items:
         raise UnsafePlan("Existing S3 Gateway endpoint missing from state")
     cluster = items.get("aws_ecs_cluster.ecommerce", {}).get("name")
@@ -111,6 +122,7 @@ def snapshot_vars(state: dict, account: str) -> dict:
         "aws_region": "eu-central-1",
         "nat_gateway_count": 1,
         "nat_gateway_mode": "on_demand",
+        "stage_nat_lifecycle": False,
         "enable_redshift_warehouse":
             "aws_redshiftserverless_workgroup.analytics[0]" in items,
         "enable_phase6_glue_silver":

@@ -122,6 +122,31 @@ def test_snapshot_refuses_nonmatching_lambda_images_and_missing_static_route():
         plan.snapshot_vars(state, "825414820081")
 
 
+
+def test_snapshot_supports_deployed_on_demand_nat_without_static_routes():
+    state = sample_state()
+    state["values"]["root_module"]["resources"] = [
+        r for r in state["values"]["root_module"]["resources"]
+        if r["address"] not in {plan.STATIC_NAT, *plan.STATIC_ROUTES}
+    ]
+    state["values"]["root_module"]["resources"].extend([
+        resource("aws_lambda_function.phase6_nat_lifecycle[0]", id="nat-controller"),
+        resource("aws_scheduler_schedule.phase6_nat_lifecycle[0]", id="default/nat-controller"),
+    ])
+    values = plan.snapshot_vars(state, "825414820081")
+    assert values["nat_gateway_mode"] == "on_demand"
+    assert values["stage_nat_lifecycle"] is False
+    assert values["nat_gateway_count"] == 1
+    assert values["enable_redshift_warehouse"] is True
+
+    # Deployed mode without its Scheduler is not a safe Terraform source.
+    state["values"]["root_module"]["resources"] = [
+        r for r in state["values"]["root_module"]["resources"]
+        if r["address"] != "aws_scheduler_schedule.phase6_nat_lifecycle[0]"
+    ]
+    with pytest.raises(plan.UnsafePlan, match="requires deployed lifecycle"):
+        plan.snapshot_vars(state, "825414820081")
+
 def test_plan_review_accepts_only_exact_nat_cutover():
     result = plan.review_plan(valid_plan())
     assert result["decision"] == "PLAN_ONLY_REVIEW_REQUIRED"
