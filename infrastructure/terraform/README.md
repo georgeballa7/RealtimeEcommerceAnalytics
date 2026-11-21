@@ -8,11 +8,11 @@ The former continuously running shared NAT Gateway (`nat-00f95208151412909`) was
 
 Terraform continues managing the VPC, two public subnets, two private application subnets, two isolated database subnets, the Internet Gateway, reserved public IPv4 EIP (`eipalloc-03c5d096fcb30e03a`), route tables, NAT lifecycle IAM, Lambda, CloudWatch log group and EventBridge Scheduler. **Terraform must not own the ephemeral NAT gateway or its private application default routes** in on-demand mode.
 
-The `ecommerce-phase6-nat-lifecycle-demo` Lambda is active, with the five-minute EventBridge Scheduler enabled. It prewarms at **07:30** and **15:30 Europe/Berlin** for the 08:00/16:00 Shopify generators and retains egress as needed for pending SQS/projector/Glue/dbt work and the scheduled **22:00 lifecycle**. The controller requires its DynamoDB lock, validates queue/worker/Glue activity before NAT deletion, and is intended to leave **no NAT** running outside required processing windows.
+The on-demand NAT controller prewarms at **07:30** and **15:30 Europe/Berlin** for the 08:00/16:00 generators. The lifecycle runs at **16:30**; NAT is deleted after verified completion and quiet-period checks, potentially before the 18:00 operational target. The controller requires its DynamoDB lock, validates queue/worker/Glue activity before NAT deletion, and is intended to leave **no NAT** running outside required processing windows.
 
 At cutover, the old NAT was deleted, both application default routes were absent, and the reserved EIP was unassociated. A live Lambda invocation at 09:47 Berlin time returned `missed_prewarm_window`, the correct outcome outside the eligible creation interval. **The next 15:30 prewarm and resulting 16:00 Shopify connectivity must still be observed to validate the complete lifecycle.**
 
-A CloudWatch alarm `ecommerce-demo-nat-lifecycle-errors` alerts the confirmed infrastructure SNS mailbox when the controller fails or the outbound routes are not active during the 07:50, 15:50 or 21:50 preflight checks. The readiness monitor does not itself create AWS resources; the lifecycle controller already handles idempotent provisioning and recovery.
+A CloudWatch alarm `ecommerce-demo-nat-lifecycle-errors` alerts the confirmed infrastructure SNS mailbox when the controller fails or the outbound routes are not active during the 07:50, 15:50 or 16:20 preflight checks. The readiness monitor does not itself create AWS resources; the lifecycle controller already handles idempotent provisioning and recovery.
 
 A NAT Gateway incurs charges while provisioned; the *reserved public IPv4 address may still incur hourly charges when unattached*. NAT creation/deletion also has lead time, so a running ECS task cannot assume continuous internet egress outside the scheduled windows.
 
@@ -20,7 +20,7 @@ A NAT Gateway incurs charges while provisioned; the *reserved public IPv4 addres
 
 - Private RDS PostgreSQL, ECS/Fargate tasks and ECR repositories, SQS/DLQ, DynamoDB, S3 landing and replay data, CloudWatch and the Phase 5 API/Lambda pipeline.
 - Glue Silver processing and Redshift Serverless warehouse, with a pinned dbt ECS task definition.
-- Phase 6 evening orchestration and Phase 7 dbt completion reconciler are deployed as **separate CloudFormation stacks**. They are not Terraform-managed; retain their checked-in CloudFormation templates. Do not import them into this Terraform root without a specific migration plan.
+- Phase 6 coordinator/loader, Phase 7 dbt orchestration and Tableau SSM access are deployed as **existing CloudFormation stacks**. Guarded Terraform import declarations are staged in `existing_stacks_import.tf`; do not apply them without reviewing the complete live-state plan. Their CloudFormation templates remain version-controlled.
 - The RDS instance can be stopped operationally. Its temporary stopped state is not a desired Terraform resource deletion.
 
 ## Planning and operational safeguards
