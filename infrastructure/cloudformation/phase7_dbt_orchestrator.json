@@ -1,12 +1,12 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Guarded completion-triggered dbt Lambda. Requires pre-existing dedicated minimal IAM role and existing EventBridge rules.",
+  "Description": "Guarded Redshift warehouse-acknowledged dbt orchestration; launching disabled until credentials and image verified",
   "Resources": {
     "OrchestratorLambda": {
       "Type": "AWS::Lambda::Function",
       "Properties": {
         "FunctionName": "ecommerce-phase7-dbt-orchestrator-demo",
-        "Description": "Verified Redshift warehouse acknowledgements to idempotent ECS dbt; disabled until validated",
+        "Description": "Completion-gated event-driven dbt runner, never on until fixed image/grants verified",
         "Role": "arn:aws:iam::825414820081:role/ecommerce-phase7-dbt-orchestrator-demo",
         "Runtime": "python3.12",
         "Handler": "index.handler",
