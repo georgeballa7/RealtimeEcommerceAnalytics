@@ -19,6 +19,25 @@ variable "phase6_dbt_image" {
   }
 }
 
+# For private Redshift Serverless networking the workgroup's public-form
+# hostname can time out even when the VPC endpoint is reachable. Resolve
+# the *regional* VPCE DNS name from EC2 and pass it explicitly on dbt rollout.
+# Empty preserves the previously deployed task's original configuration,
+# which is important during unrelated, state-guarded NAT cutover plans.
+variable "phase6_dbt_private_host" {
+  type        = string
+  default     = ""
+  description = "Verified regional Redshift Serverless VPC endpoint DNS host for ECS dbt."
+
+  validation {
+    condition = var.phase6_dbt_private_host == "" || can(regex(
+      "^vpce-[a-z0-9-]+[.]vpce-svc-[a-z0-9-]+[.]eu-central-1[.]vpce[.]amazonaws[.]com$",
+      var.phase6_dbt_private_host
+    ))
+    error_message = "Set a regional private VPCE DNS name, never an arbitrary host."
+  }
+}
+
 resource "aws_ecr_repository" "phase6_dbt" {
   count                = var.enable_phase6_dbt_runner ? 1 : 0
   name                 = "ecommerce-phase6-dbt-${var.environment}"
@@ -119,7 +138,7 @@ resource "aws_ecs_task_definition" "phase6_dbt" {
     environment = [
       { name = "AWS_REGION", value = var.aws_region },
       { name = "REDSHIFT_WORKGROUP", value = aws_redshiftserverless_workgroup.analytics[0].workgroup_name },
-      { name = "REDSHIFT_HOST", value = aws_redshiftserverless_workgroup.analytics[0].endpoint[0].address },
+      { name = "REDSHIFT_HOST", value = var.phase6_dbt_private_host != "" ? var.phase6_dbt_private_host : aws_redshiftserverless_workgroup.analytics[0].endpoint[0].address },
       { name = "REDSHIFT_DATABASE", value = "analytics" },
     ]
     # Safe default: accidentally running the task does not modify Redshift.
