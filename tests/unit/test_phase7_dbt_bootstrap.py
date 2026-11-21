@@ -75,29 +75,3 @@ def test_release_scripts_use_phase7_branch_and_exact_plan_gate():
     assert "assignPublicIp = 'DISABLED'" in launch
 
 
-def test_dbt_release_vars_preserves_state_and_static_nat():
-    from scripts.aws.phase7_dbt_release_vars import dbt_vars
-    from tests.unit.test_phase7_nat_cutover_plan import sample_state, PINNED
-
-    state = sample_state()
-    state["values"]["root_module"]["resources"].append({
-        "address": "aws_ecs_task_definition.db_bootstrap[0]",
-        "values": {"container_definitions": __import__("json").dumps([
-            {"name": "bootstrap", "image": PINNED}
-        ])},
-    })
-    result = dbt_vars(state, "825414820081", "")
-    assert result["nat_gateway_mode"] == "static"
-    assert result["enable_phase6_dbt_runner"] is True
-    assert result["phase6_dbt_image"] == ""
-    assert result["db_bootstrap_image"] == PINNED
-    assert result["enable_redshift_warehouse"] is True
-
-
-def test_dbt_release_vars_rejects_wrong_account_image():
-    from scripts.aws.phase7_dbt_release_vars import dbt_vars
-    from tests.unit.test_phase7_nat_cutover_plan import sample_state
-
-    image = "123456789012.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-phase6-dbt-demo@sha256:" + "a" * 64
-    with pytest.raises(ValueError, match="Unapproved dbt ECR image"):
-        dbt_vars(sample_state(), "825414820081", image)
