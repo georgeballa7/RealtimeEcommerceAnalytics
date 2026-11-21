@@ -28,6 +28,9 @@ try {
     $Branch = (& git branch --show-current | Out-String).Trim()
     Assert-Exit 'Git branch'
     if ($Branch -ne 'feature/dbt-analytics-churn-model') { throw "Unexpected branch: $Branch" }
+    $changes = @(& git status --porcelain)
+    Assert-Exit 'Git working tree'
+    if ($changes.Count -gt 0) { throw 'Commit or stash changes before publishing the immutable dbt image' }
     $Commit = (& git rev-parse --short=12 HEAD | Out-String).Trim()
     Assert-Exit 'Git commit'
     $Tag = "dbt-$Commit"
