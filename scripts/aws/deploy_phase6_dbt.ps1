@@ -30,6 +30,8 @@ $TerraformDir = Join-Path $Root 'infrastructure\terraform'
 $PlanPath = Join-Path $TerraformDir 'phase6-dbt-reviewed.tfplan'
 $PlanJson = Join-Path ([IO.Path]::GetTempPath()) ('dbt-plan-' + [guid]::NewGuid().ToString('N') + '.json')
 $Guard = Join-Path $Root 'scripts\aws\phase7_dbt_plan_guard.py'
+$VarsBuilder = Join-Path $Root 'scripts\aws\phase7_dbt_release_vars.py'
+$StateJson = Join-Path ([IO.Path]::GetTempPath()) ('dbt-state-' + [guid]::NewGuid().ToString('N') + '.json')
 $VarsFile = $null
 
 function Assert-Exit([string]$Label) {
@@ -89,24 +91,32 @@ try {
         }
     }
     $stage = if ($PinnedImage) { 'task' } else { 'foundation' }
-    $vars = [ordered]@{
-        aws_account_id = $AccountId; aws_profile = $AwsProfile; aws_region = $Region
-        shopify_shop_domain = $ShopDomain; shopify_client_credentials_secret_arn = $ClientSecret
-        shopify_webhook_secret_arn = $WebhookSecret
-        phase5_lambda_image = $LambdaImage; phase5_projector_image = $ProjectorImage
-        phase5_generator_image = $GeneratorImage; phase5_lifecycle_image = $LifecycleImage
-        enable_redshift_warehouse = $true; enable_phase6_glue_silver = $true
-        enable_phase6_glue_rds_lease = $true
-        enable_phase5_legacy_lifecycle_schedule = $true
-        enable_phase6_dbt_runner = $true; phase6_dbt_image = $PinnedImage
-    }
+    # Temporary inputs are reconstructed from the *actual* Terraform state
+    # after init. Never assume omitted optional image variables are disabled.
     $VarsFile = Join-Path ([IO.Path]::GetTempPath()) ("dbt-vars-" + [guid]::NewGuid().ToString('N') + '.tfvars.json')
-    [IO.File]::WriteAllText($VarsFile, ($vars | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
 
     Push-Location $TerraformDir
     try {
         & terraform init -input=false
         Assert-Exit 'Terraform init'
+        & terraform show -json | Out-File -LiteralPath $StateJson -Encoding utf8
+        Assert-Exit 'Read current Terraform state JSON'
+        & python -X utf8 $VarsBuilder --state $StateJson --output $VarsFile --account $AccountId --pinned-image $PinnedImage
+        Assert-Exit 'Preserve existing Terraform resources and digest-pinned images'
+        $saved = Get-Content -LiteralPath $VarsFile -Raw | ConvertFrom-Json
+        foreach ($match in @(
+            @($saved.phase5_lambda_image, $LambdaImage),
+            @($saved.phase5_generator_image, $GeneratorImage),
+            @($saved.phase5_projector_image, $ProjectorImage),
+            @($saved.phase5_lifecycle_image, $LifecycleImage),
+            @($saved.shopify_shop_domain, $ShopDomain),
+            @($saved.shopify_webhook_secret_arn, $WebhookSecret),
+            @($saved.shopify_client_credentials_secret_arn, $ClientSecret)
+        )) {
+            if ($match[0] -ne $match[1]) {
+                throw 'Live AWS deployment differs from Terraform state. Stop and reconcile drift.'
+            }
+        }
         & terraform validate
         Assert-Exit 'Terraform validate'
         & terraform plan -no-color "-var-file=$VarsFile" "-out=$PlanPath"
@@ -135,5 +145,6 @@ finally {
     Pop-Location
     if ($VarsFile) { Remove-Item -LiteralPath $VarsFile -Force -ErrorAction SilentlyContinue }
     if (Test-Path $PlanJson) { Remove-Item -LiteralPath $PlanJson -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $StateJson) { Remove-Item -LiteralPath $StateJson -Force -ErrorAction SilentlyContinue }
     if (Test-Path $PlanPath) { Remove-Item -LiteralPath $PlanPath -Force -ErrorAction SilentlyContinue }
 }
