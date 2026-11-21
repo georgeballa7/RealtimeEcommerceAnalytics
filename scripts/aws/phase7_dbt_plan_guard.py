@@ -50,20 +50,34 @@ def validate(plan: dict, stage: str) -> dict:
             raise UnsafeDbtPlan("Duplicate change address: " + str(addr))
         modified[addr] = actions
     expected = FOUNDATION if stage == "foundation" else TASK
-    if modified != {name: ["create"] for name in expected}:
+    # ECS task definitions are immutable: changing only the pinned dbt image
+    # registers a new revision (Terraform replace). Permit that exact
+    # address only, never replacement of NAT, Redshift or other ECS tasks.
+    task_actions = [["create"], ["delete", "create"], ["create", "delete"]]
+    task_change = modified.get("aws_ecs_task_definition.phase6_dbt[0]")
+    accepted = (
+        modified == {name: ["create"] for name in expected}
+        if stage == "foundation"
+        else set(modified) == TASK and task_change in task_actions
+    )
+    if not accepted:
         missing = sorted(expected - set(modified))
         extra = {key: val for key, val in modified.items()
-                 if key not in expected or val != ["create"]}
+                 if key not in expected or (
+                     stage == "foundation" and val != ["create"]) or (
+                     stage == "task" and val not in task_actions)}
         raise UnsafeDbtPlan(
             "Refusing unrelated, incomplete or destructive Terraform diff. "
             + "Missing: " + json.dumps(missing)
             + "; unexpected: " + json.dumps(extra, sort_keys=True)
         )
+    replaced = stage == "task" and len(task_change) == 2
     return {
         "decision": "REVIEWED_DBT_ONLY",
         "stage": stage,
         "create_count": len(expected),
-        "delete_count": 0,
+        "delete_count": 1 if replaced else 0,
+        "replace_count": 1 if replaced else 0,
         "update_count": 0,
         "allowed": sorted(expected),
         "note": "A user must explicitly approve the saved Terraform plan.",
