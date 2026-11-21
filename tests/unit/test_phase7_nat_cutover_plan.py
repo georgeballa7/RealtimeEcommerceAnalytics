@@ -165,3 +165,31 @@ def test_plan_review_rejects_unexpected_data_reads():
     })
     with pytest.raises(plan.UnsafePlan, match="data-source"):
         plan.review_plan(candidate)
+
+
+def test_dbt_release_preserves_optional_db_bootstrap_and_static_nat():
+    from scripts.aws.phase7_dbt_release_vars import dbt_vars
+
+    state = sample_state()
+    state["values"]["root_module"]["resources"].append(
+        resource(
+            "aws_ecs_task_definition.db_bootstrap[0]",
+            container_definitions=json.dumps([{
+                "name": "bootstrap", "image": PINNED,
+            }]),
+        )
+    )
+    config = dbt_vars(state, "825414820081", "")
+    assert config["nat_gateway_mode"] == "static"
+    assert config["enable_phase6_dbt_runner"] is True
+    assert config["phase6_dbt_image"] == ""
+    assert config["db_bootstrap_image"] == PINNED
+    assert config["enable_redshift_warehouse"] is True
+
+
+def test_dbt_release_refuses_unapproved_docker_image():
+    from scripts.aws.phase7_dbt_release_vars import dbt_vars
+
+    image = "123456789012.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-phase6-dbt-demo@sha256:" + "a" * 64
+    with pytest.raises(plan.UnsafePlan, match="Unapproved dbt ECR image"):
+        dbt_vars(sample_state(), "825414820081", image)
