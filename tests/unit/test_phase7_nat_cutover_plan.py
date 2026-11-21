@@ -193,3 +193,30 @@ def test_dbt_release_refuses_unapproved_docker_image():
     image = "123456789012.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-phase6-dbt-demo@sha256:" + "a" * 64
     with pytest.raises(plan.UnsafePlan, match="Unapproved dbt ECR image"):
         dbt_vars(sample_state(), "825414820081", image)
+
+
+def test_state_helpers_work_from_terraform_directory_as_native_cli(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    state = tmp_path / "terraform-show.json"
+    output = tmp_path / "release-vars.json"
+    state.write_text(json.dumps(sample_state()), encoding="utf-8")
+    tool = root / "scripts" / "aws" / "phase7_dbt_release_vars.py"
+    run = subprocess.run(
+        [
+            sys.executable, "-X", "utf8", str(tool),
+            "--state", str(state), "--output", str(output),
+            "--account", "825414820081",
+        ],
+        cwd=root / "infrastructure" / "terraform",
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert run.returncode == 0, run.stderr
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["nat_gateway_mode"] == "static"
+    assert payload["enable_phase6_dbt_runner"] is True
