@@ -38,6 +38,12 @@ def validate(plan: dict, stage: str) -> dict:
         actions = row.get("change", {}).get("actions")
         if actions == ["no-op"]:
             continue
+        # The existing VPC AZ lookup may be refreshed during planning.
+        # This is a provider data read, not a new infrastructure resource.
+        if (row.get("mode") == "data"
+                and addr == "data.aws_availability_zones.available"
+                and actions == ["read"]):
+            continue
         # Provider data sources often re-read during plan, but any new
         # unknown read is treated as a blocker for a minimal dbt deployment.
         if addr in modified:
