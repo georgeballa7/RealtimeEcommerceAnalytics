@@ -1,5 +1,5 @@
 """No AWS writes: test opt-in NAT lifecycle decisions and route ownership."""
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
@@ -144,3 +144,137 @@ def test_terraform_legacy_schedule_defaults_to_preserved_until_verified():
     assert 'enable_phase5_legacy_lifecycle_schedule' in script
     assert 'default     = true' in script
     assert 'var.enable_phase5_legacy_lifecycle_schedule ? 1 : 0' in script
+
+
+def test_natural_afternoon_handoff_records_slot_before_nat_release(monkeypatch):
+    """If morning NAT survives to 15:30, it must be kept for 16:00 orders."""
+    now = datetime(2026, 11, 21, 14, 30, tzinfo=timezone.utc)
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is None else now.astimezone(tz)
+
+    nat = {
+        "NatGatewayId": "nat-morning",
+        "State": "available",
+        "Tags": [{"Key": "Day", "Value": "2026-11-21"},
+                 {"Key": "Slot", "Value": "morning"}],
+    }
+    settings = {
+        "NAT_VPC_ID": "vpc-test",
+        "CONTROLLER_TABLE": "controller",
+        "route_tables": ["rtb-a", "rtb-b"],
+    }
+    table = Mock()
+    session = Mock()
+    session.resource.return_value.Table.return_value = table
+    recorded = []
+    monkeypatch.setattr(mod, "datetime", FixedDatetime)
+    monkeypatch.setattr(mod, "config", lambda: settings)
+    monkeypatch.setattr(mod.boto3, "Session", lambda **kwargs: session)
+    monkeypatch.setattr(mod, "acquire_lock", lambda *args: True)
+    monkeypatch.setattr(mod, "managed_nat", lambda *args: nat)
+    monkeypatch.setattr(mod, "ensure_default_routes", lambda *args: recorded.append("routes"))
+    monkeypatch.setattr(mod, "record_warm", lambda _table, day, slot:
+                        recorded.append(("warm", day, slot)))
+    def fake_release(*args):
+        recorded.append("release_check")
+        return {"nat_lifecycle": "retained"}
+    monkeypatch.setattr(mod, "release_if_idle", fake_release)
+
+    result = mod.handler({}, None)
+    assert result == {"nat_lifecycle": "retained"}
+    assert recorded == [
+        ("warm", "2026-11-21", "afternoon"), "routes", "release_check"
+    ]
+
+
+def test_cross_midnight_nat_release_preserves_original_slot_date(monkeypatch):
+    """00:30 belongs to yesterday's 22:00 lifecycle, not today's morning."""
+    nat = {
+        "NatGatewayId": "nat-morning",
+        "State": "available",
+        "Tags": [{"Key": "Day", "Value": "2026-11-21"},
+                 {"Key": "Slot", "Value": "morning"}],
+    }
+    local = datetime(2026, 11, 22, 0, 30, tzinfo=BERLIN)
+    table = Mock()
+    data = {
+        "phase6-nat:2026-11-21:morning": {
+            "phase": "warming",
+        },
+        "phase6-nat:2026-11-21:afternoon": {
+            "phase": "warming",
+        },
+        "phase6-morning": {"day": "2026-11-21", "phase": "completed"},
+        "phase6-evening": {"day": "2026-11-21", "phase": "completed"},
+        "phase5-controller": {},
+    }
+    table.get_item.side_effect = lambda Key, **kwargs: {"Item": data[Key["id"]]} \
+        if Key["id"] in data else {}
+    ec2 = Mock()
+    monkeypatch.setattr(mod, "inactive_workloads", lambda *a, **kw: None)
+    monkeypatch.setattr(mod, "remove_default_routes", lambda *a: None)
+    response = mod.release_if_idle(
+        ec2, {}, table, {"route_tables": ["rtb-a", "rtb-b"]},
+        nat, local,
+    )
+    assert response["nat_lifecycle"] == "delete_requested"
+    ec2.delete_nat_gateway.assert_called_once_with(NatGatewayId="nat-morning")
+    updated = [call.kwargs["Key"]["id"]
+               for call in table.update_item.call_args_list]
+    assert updated == [
+        "phase6-nat:2026-11-21:morning",
+        "phase6-nat:2026-11-21:afternoon",
+    ]
+
+
+def test_new_day_open_slot_blocks_old_gateway_release(monkeypatch):
+    """A gateway carried over from yesterday must protect today's 08:00 run."""
+    nat = {
+        "NatGatewayId": "nat-yesterday",
+        "State": "available",
+        "Tags": [{"Key": "Day", "Value": "2026-11-20"},
+                 {"Key": "Slot", "Value": "afternoon"}],
+    }
+    local = datetime(2026, 11, 21, 7, 30, tzinfo=BERLIN)
+    table = Mock()
+    data = {
+        "phase6-nat:2026-11-20:afternoon": {"phase": "warming"},
+        "phase6-nat:2026-11-21:morning": {"phase": "warming"},
+        "phase6-evening": {"day": "2026-11-20", "phase": "completed"},
+        "phase5-controller": {},
+    }
+    table.get_item.side_effect = lambda Key, **kwargs: {"Item": data[Key["id"]]} \
+        if Key["id"] in data else {}
+    ec2 = Mock()
+    monkeypatch.setattr(mod, "inactive_workloads", lambda *a, **kw: None)
+    response = mod.release_if_idle(ec2, {}, {
+        "get_item": table.get_item,
+        "update_item": table.update_item,
+    }, {"route_tables": ["rtb-a", "rtb-b"]}, nat, local)
+    assert response["nat_lifecycle"] == "awaiting_slot_completion"
+    assert response["day"] == "2026-11-21"
+    assert response["slot"] == "morning"
+    ec2.delete_nat_gateway.assert_not_called()
+
+
+def test_previous_day_morning_can_release_after_midnight_if_idle():
+    """Yesterday's morning cannot become stuck until 08:30 the next day."""
+    local = datetime(2026, 11, 22, 0, 30, tzinfo=BERLIN)
+    clients = {
+        "ecs": Mock(), "sqs": Mock(), "ddb": Mock(), "glue": Mock()
+    }
+    clients["ecs"].list_tasks.return_value = {"taskArns": []}
+    clients["sqs"].get_queue_attributes.return_value = {
+        "Attributes": {"ApproximateNumberOfMessages": "0",
+                       "ApproximateNumberOfMessagesNotVisible": "0"}
+    }
+    clients["ddb"].Table.return_value.query.return_value = {"Count": 0}
+    clients["glue"].get_job_runs.return_value = {"JobRuns": []}
+    settings = {
+        "ECS_CLUSTER": "ecommerce-demo", "EVENT_QUEUE_URL": "queue",
+        "EVENTS_TABLE": "events", "GLUE_JOB_NAME": "job"
+    }
+    assert mod.inactive_workloads(clients, settings, {}, local, "morning",
+                                  day="2026-11-21") is None
