@@ -28,6 +28,8 @@ $AccountId = '825414820081'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $TerraformDir = Join-Path $Root 'infrastructure\terraform'
 $PlanPath = Join-Path $TerraformDir 'phase6-dbt-reviewed.tfplan'
+$PlanJson = Join-Path ([IO.Path]::GetTempPath()) ('dbt-plan-' + [guid]::NewGuid().ToString('N') + '.json')
+$Guard = Join-Path $Root 'scripts\aws\phase7_dbt_plan_guard.py'
 $VarsFile = $null
 
 function Assert-Exit([string]$Label) {
@@ -50,7 +52,7 @@ Push-Location $Root
 try {
     $branch = (& git branch --show-current | Out-String).Trim()
     Assert-Exit 'Git branch'
-    if ($branch -ne 'feature/redshift-warehouse-dbt-churn') { throw "Unexpected working branch: $branch" }
+    if ($branch -ne 'feature/dbt-analytics-churn-model') { throw "Unexpected working branch: $branch" }
     $changes = @(& git status --porcelain)
     Assert-Exit 'Git worktree'
     if ($changes.Count -gt 0) { throw 'Commit or stash working-tree changes first' }
@@ -81,6 +83,60 @@ try {
     $LifecycleTask = AwsValue -Params @('scheduler','get-schedule','--name','ecommerce-demo-phase5-lifecycle','--query','Target.EcsParameters.TaskDefinitionArn')
     $LifecycleImage = ImageForTask $LifecycleTask
 
+    foreach ($image in @($LambdaImage,$GeneratorImage,$ProjectorImage,$LifecycleImage)) {
+        if ($image -notmatch '@sha256:[a-f0-9]{64}
+        aws_account_id = $AccountId; aws_profile = $AwsProfile; aws_region = $Region
+        shopify_shop_domain = $ShopDomain; shopify_client_credentials_secret_arn = $ClientSecret
+        shopify_webhook_secret_arn = $WebhookSecret
+        phase5_lambda_image = $LambdaImage; phase5_projector_image = $ProjectorImage
+        phase5_generator_image = $GeneratorImage; phase5_lifecycle_image = $LifecycleImage
+        enable_redshift_warehouse = $true; enable_phase6_glue_silver = $true
+        enable_phase6_glue_rds_lease = $true
+        enable_phase5_legacy_lifecycle_schedule = $true
+        enable_phase6_dbt_runner = $true; phase6_dbt_image = $PinnedImage
+    }
+    $VarsFile = Join-Path ([IO.Path]::GetTempPath()) ("dbt-vars-" + [guid]::NewGuid().ToString('N') + '.tfvars.json')
+    [IO.File]::WriteAllText($VarsFile, ($vars | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
+
+    Push-Location $TerraformDir
+    try {
+        & terraform init -input=false
+        Assert-Exit 'Terraform init'
+        & terraform validate
+        Assert-Exit 'Terraform validate'
+        & terraform plan -no-color "-var-file=$VarsFile" "-out=$PlanPath"
+        Assert-Exit 'Terraform plan'
+        & terraform show -json $PlanPath | Out-File -LiteralPath $PlanJson -Encoding utf8
+        Assert-Exit 'Terraform show JSON'
+        & python -X utf8 $Guard --plan $PlanJson --stage $stage
+        Assert-Exit 'Strict dbt-only Terraform resource review'
+        & terraform show $PlanPath
+        Assert-Exit 'Terraform show'
+        if (-not $Apply) {
+            Write-Host 'PLAN ONLY. Review the exact changes, then rerun with -Apply.'
+            return
+        }
+        $approval = Read-Host 'Type DEPLOY-DBT to apply this exact Terraform plan'
+        if ($approval -cne 'DEPLOY-DBT') { throw 'Apply not approved' }
+        & terraform apply -input=false $PlanPath
+        Assert-Exit 'Terraform apply'
+    }
+    finally { Pop-Location }
+
+    Write-Host 'dbt Terraform release applied. No dbt task was launched.'
+    Write-Host 'Run terraform output -json for ECR, task-definition and security-group identifiers.'
+}
+finally {
+    Pop-Location
+    if ($VarsFile) { Remove-Item -LiteralPath $VarsFile -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $PlanJson) { Remove-Item -LiteralPath $PlanJson -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $PlanPath) { Remove-Item -LiteralPath $PlanPath -Force -ErrorAction SilentlyContinue }
+}
+) {
+            throw 'Refusing to plan with mutable or unpinned deployed image'
+        }
+    }
+    $stage = if ($PinnedImage) { 'task' } else { 'foundation' }
     $vars = [ordered]@{
         aws_account_id = $AccountId; aws_profile = $AwsProfile; aws_region = $Region
         shopify_shop_domain = $ShopDomain; shopify_client_credentials_secret_arn = $ClientSecret
