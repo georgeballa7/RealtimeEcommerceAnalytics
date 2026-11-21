@@ -202,6 +202,16 @@ def create_managed_nat(ec2, settings, day, slot):
     return log("created", nat_id=nat["NatGatewayId"], slot=slot, state=nat["State"])
 
 
+def slot_is_stale(local: datetime, day: str, slot: str) -> bool:
+    """Evaluate staleness against a slot's own day, across midnight."""
+    today = local.date().isoformat()
+    if day > today:
+        return False
+    if day < today:
+        return slot == "morning" or local.hour >= 3
+    return is_stale(local, slot)
+
+
 def inactive_workloads(clients, settings, controller, local, slot, *, day=None):
     """Fail closed: only delete NAT when ALL outbound-workload checks pass."""
     window_open = can_consider_release(local, slot)
@@ -215,7 +225,7 @@ def inactive_workloads(clients, settings, controller, local, slot, *, day=None):
         return "projector_not_idle"
     last = [controller.get("last_event_at"), controller.get("last_work_at")]
     timestamps = [datetime.fromisoformat(x) for x in last if x]
-    if not timestamps and not is_stale(local, slot):
+    if not timestamps and not slot_is_stale(local, day or local.date().isoformat(), slot):
         return "no_confirmed_activity"
     if timestamps and (datetime.now(timezone.utc) - max(timestamps)).total_seconds() < QUIET_SECONDS:
         return "recent_projected_activity"
@@ -260,12 +270,7 @@ def active_slot_finished(table, day: str, slot: str, local: datetime):
     # Only a stale *idle* pipeline may be shut down after a missed/failed run.
     # Use the original slot date after midnight, not today's unrelated slot.
     # The calling path checks every active workload and backlog independently.
-    today = local.date().isoformat()
-    if day < today:
-        return slot == "morning" or local.hour >= 3
-    if day > today:
-        return False
-    return is_stale(local, slot)
+    return slot_is_stale(local, day, slot)
 
 
 def release_if_idle(ec2, clients, table, settings, nat, local):
