@@ -12,6 +12,8 @@ The `ecommerce-phase6-nat-lifecycle-demo` Lambda is active, with the five-minute
 
 At cutover, the old NAT was deleted, both application default routes were absent, and the reserved EIP was unassociated. A live Lambda invocation at 09:47 Berlin time returned `missed_prewarm_window`, the correct outcome outside the eligible creation interval. **The next 15:30 prewarm and resulting 16:00 Shopify connectivity must still be observed to validate the complete lifecycle.**
 
+A CloudWatch alarm `ecommerce-demo-nat-lifecycle-errors` alerts the confirmed infrastructure SNS mailbox when the controller fails or the outbound routes are not active during the 07:50, 15:50 or 21:50 preflight checks. The readiness monitor does not itself create AWS resources; the lifecycle controller already handles idempotent provisioning and recovery.
+
 A NAT Gateway incurs charges while provisioned; the *reserved public IPv4 address may still incur hourly charges when unattached*. NAT creation/deletion also has lead time, so a running ECS task cannot assume continuous internet egress outside the scheduled windows.
 
 ## Additional deployed components

@@ -47,3 +47,24 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
   dimensions = { DBInstanceIdentifier = aws_db_instance.ecommerce.identifier }
   alarm_actions = [aws_sns_topic.alerts.arn]
 }
+
+# On-demand NAT egress failure or an unavailable gateway/route during the
+# 07:50/15:50/21:50 preflight must notify the confirmed infrastructure mailbox.
+# Missing invocations when no NAT is needed are not errors.
+resource "aws_cloudwatch_metric_alarm" "nat_lifecycle_errors" {
+  count               = local.nat_lifecycle_count
+  alarm_name          = "ecommerce-${var.environment}-nat-lifecycle-errors"
+  alarm_description   = "On-demand NAT controller or outbound readiness preflight failed; check Lambda logs before the Shopify/lifecycle schedule."
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  dimensions = {
+    FunctionName = aws_lambda_function.phase6_nat_lifecycle[0].function_name
+  }
+  alarm_actions = [aws_sns_topic.alerts.arn]
+}

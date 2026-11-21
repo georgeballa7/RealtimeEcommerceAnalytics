@@ -117,13 +117,57 @@ def test_nat_will_not_delete_when_projector_or_error_hold_exists():
 def test_terraform_keeps_static_nat_by_default_and_dynamic_opt_in_isolated():
     network = (ROOT / "infrastructure/terraform/networking.tf").read_text()
     dynamic = (ROOT / "infrastructure/terraform/phase6_nat_on_demand.tf").read_text()
-    assert 'default     = "static"' in network
+    assert 'default     = "on_demand"' in network
     assert 'var.nat_gateway_mode == "static" ? var.nat_gateway_count : 0' in network
-    assert 'var.nat_gateway_mode == "static" ? 2 : 0' in network
-    assert 'var.nat_gateway_mode == "on_demand" ? 1 : 0' in dynamic
+    assert 'local.nat_lifecycle_count' in dynamic
+    assert 'var.nat_gateway_mode == "on_demand" ? "ENABLED" : "DISABLED"' in dynamic
     assert 'ec2:ResourceTag/Purpose' in dynamic
     assert 'ecommerce-phase6-nat-lifecycle' in dynamic
     assert 's3' in network.lower() and 'Gateway' in network
+
+
+@pytest.mark.parametrize(
+    ("hour", "minute", "expected"),
+    [
+        (7, 49, False), (7, 50, True), (8, 0, True),
+        (8, 9, True), (8, 10, False),
+        (15, 49, False), (15, 50, True), (16, 5, True),
+        (16, 10, False),
+        (21, 49, False), (21, 50, True), (22, 9, True),
+        (22, 10, False),
+    ],
+)
+def test_outbound_readiness_windows(hour, minute, expected):
+    local = datetime(2026, 11, 21, hour, minute, tzinfo=BERLIN)
+    assert mod.generation_readiness_window(local) is expected
+
+
+def test_outbound_readiness_reports_missing_nat_and_incomplete_routes():
+    local = datetime(2026, 11, 21, 15, 55, tzinfo=BERLIN)
+    ec2 = Mock()
+    with pytest.raises(RuntimeError, match="not available"):
+        mod.require_outbound_ready(local, ec2, ["rtb-a", "rtb-b"], None)
+    ec2.describe_route_tables.return_value = {
+        "RouteTables": [
+            {"RouteTableId": "rtb-a", "Routes": [
+                {"DestinationCidrBlock": "0.0.0.0/0",
+                 "NatGatewayId": "nat-ready", "State": "active"}]},
+            {"RouteTableId": "rtb-b", "Routes": []},
+        ]
+    }
+    with pytest.raises(RuntimeError, match="not active"):
+        mod.require_outbound_ready(
+            local, ec2, ["rtb-a", "rtb-b"],
+            {"State": "available", "NatGatewayId": "nat-ready"}
+        )
+    ec2.describe_route_tables.return_value["RouteTables"][1]["Routes"].append(
+        {"DestinationCidrBlock": "0.0.0.0/0",
+         "NatGatewayId": "nat-ready", "State": "active"}
+    )
+    assert mod.require_outbound_ready(
+        local, ec2, ["rtb-a", "rtb-b"],
+        {"State": "available", "NatGatewayId": "nat-ready"}
+    ) is None
 
 
 def test_morning_and_afternoon_use_distinct_daily_nat_records():

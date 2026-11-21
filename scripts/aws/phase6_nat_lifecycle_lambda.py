@@ -75,6 +75,49 @@ def is_stale(local: datetime, slot: str) -> bool:
     return True
 
 
+def generation_readiness_window(local: datetime) -> bool:
+    """Verify NAT routing ahead of all Shopify/outbound ECS execution windows.
+
+    A controller tick between 07:50-08:10, 15:50-16:10, and
+    21:50-22:10 must fail visibly if internet egress is not ready.
+    The failure triggers the CloudWatch Lambda Errors alarm.
+    """
+    minute = local.hour * 60 + local.minute
+    return any(
+        start <= minute < end
+        for start, end in (
+            (7 * 60 + 50, 8 * 60 + 10),
+            (15 * 60 + 50, 16 * 60 + 10),
+            (21 * 60 + 50, 22 * 60 + 10),
+        )
+    )
+
+
+def require_outbound_ready(local: datetime, ec2, route_tables, nat) -> None:
+    """Alert (via Lambda error metric) when the scheduled egress is not ready.
+
+    No resources are created here: provisioning/recovery remains owned by
+    the existing idempotent NAT and route lifecycle below.
+    """
+    if not generation_readiness_window(local):
+        return
+    if not nat or nat.get("State") != "available":
+        log("outbound_unready", reason="nat_not_available",
+            nat_state=nat.get("State") if nat else "absent")
+        raise RuntimeError("NAT is not available before outbound ECS schedule")
+    for table in verify_existing_route_tables(ec2, route_tables):
+        active = any(
+            route.get("DestinationCidrBlock") == "0.0.0.0/0"
+            and route.get("NatGatewayId") == nat["NatGatewayId"]
+            and route.get("State") == "active"
+            for route in table.get("Routes", [])
+        )
+        if not active:
+            log("outbound_unready", reason="app_route_not_active",
+                route_table=table["RouteTableId"], nat_id=nat["NatGatewayId"])
+            raise RuntimeError("NAT application default route is not active")
+
+
 def log(action: str, **details):
     message = {"nat_lifecycle": action, **details}
     print(json.dumps(message, sort_keys=True))
@@ -388,8 +431,10 @@ def handler(event, context):
         }
         nat = managed_nat(ec2, settings["NAT_VPC_ID"])
         if nat and nat["State"] in ("deleting", "failed"):
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return log("nat_transition", nat_id=nat["NatGatewayId"], state=nat["State"])
         if nat and nat["State"] == "pending":
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return log("awaiting_nat", nat_id=nat["NatGatewayId"])
         if nat and nat["State"] == "available":
             # A morning NAT may still be available when afternoon prewarming
@@ -398,17 +443,24 @@ def handler(event, context):
             if slot and can_begin_new_warm(local, slot):
                 record_warm(table, today, slot)
             ensure_default_routes(ec2, settings["route_tables"], nat["NatGatewayId"])
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return release_if_idle(ec2, clients, table, settings, nat, local)
         if slot is None:
             return log("idle_no_nat")
         existing = load_record(table, today, slot)
         if existing and existing.get("phase") == "closed":
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return log("completed_no_nat", slot=slot)
         if not existing:
             if not can_begin_new_warm(local, slot):
+                require_outbound_ready(local, ec2, settings["route_tables"], nat)
                 return log("missed_prewarm_window", slot=slot)
             record_warm(table, today, slot)
-        return create_managed_nat(ec2, settings, today, slot)
+        response = create_managed_nat(ec2, settings, today, slot)
+        # An unready 07:50/15:50/21:50 preflight must page the operator,
+        # even when a recovery NAT create request has just been accepted.
+        require_outbound_ready(local, ec2, settings["route_tables"], nat)
+        return response
     finally:
         try:
             table.delete_item(
