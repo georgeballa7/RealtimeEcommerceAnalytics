@@ -144,7 +144,7 @@ resource "aws_lambda_function" "phase6_nat_lifecycle" {
 }
 
 # This is a NETWORK readiness tick; NOT a Shopify order generation schedule.
-# Existing 08:00/16:00 generator schedules remain. The 17:00 end-of-day
+# Existing 08:00/16:00 generator schedules remain. The 16:30 end-of-day
 # lifecycle is independently controlled by enable_phase5_legacy_lifecycle_schedule.
 resource "aws_iam_role" "phase6_nat_schedule" {
   count = local.nat_lifecycle_count
