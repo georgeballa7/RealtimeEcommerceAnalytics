@@ -40,7 +40,7 @@ $statements = @($source.Split(';') | ForEach-Object { $_.Trim() } | Where-Object
 if ($statements.Count -ne 8 -or $statements[0] -ne 'CREATE SCHEMA IF NOT EXISTS analytics_staging' -or
     $statements[1] -ne 'CREATE SCHEMA IF NOT EXISTS analytics_marts' -or
     $statements[2] -ne 'CREATE SCHEMA IF NOT EXISTS analytics' -or
-    $statements[3..7] -join ' ' -notmatch 'IAMR:ecommerce-phase6-dbt-task-demo') {
+    (($statements[3..7] -join ' ') -notmatch 'IAMR:ecommerce-phase6-dbt-task-demo')) {
     throw 'SQL migration differs from reviewed dbt-only contract'
 }
 Write-Host 'Reviewed Redshift dbt SQL migration: 3 CREATE SCHEMA + 5 GRANT statements.'
