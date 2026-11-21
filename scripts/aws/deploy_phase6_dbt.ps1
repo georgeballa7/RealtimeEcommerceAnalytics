@@ -107,6 +107,69 @@ try {
         $builderArgs = @('-X', 'utf8', $VarsBuilder, '--state', $StateJson, '--output', $VarsFile, '--account', $AccountId)
         if ($PinnedImage -ne '') {
             $builderArgs += @('--pinned-image', $PinnedImage)
+            # The workgroup hostname timed out from Fargate although the
+            # private Redshift VPCE DNS succeeded. Resolve the REGIONAL
+            # endpoint from live AWS instead of pinning an ephemeral ENI IP.
+            $VpcEndpoint = AwsValue -Params @(
+                'redshift-serverless','get-workgroup',
+                '--workgroup-name','ecommerce-analytics-demo',
+                '--query','workgroup.endpoint.vpcEndpoints[0].vpcEndpointId'
+            )
+            $PrivateHost = AwsValue -Params @(
+                'ec2','describe-vpc-endpoints','--vpc-endpoint-ids',$VpcEndpoint,
+                '--query','VpcEndpoints[0].DnsEntries[0].DnsName'
+            )
+            if ($PrivateHost -notmatch '^vpce-[a-z0-9-]+[.]vpce-svc-[a-z0-9-]+[.]eu-central-1[.]vpce[.]amazonaws[.]com
+        Assert-Exit 'Preserve existing Terraform resources and digest-pinned images'
+        $saved = Get-Content -LiteralPath $VarsFile -Raw | ConvertFrom-Json
+        foreach ($match in @(
+            @($saved.phase5_lambda_image, $LambdaImage),
+            @($saved.phase5_generator_image, $GeneratorImage),
+            @($saved.phase5_projector_image, $ProjectorImage),
+            @($saved.phase5_lifecycle_image, $LifecycleImage),
+            @($saved.shopify_shop_domain, $ShopDomain),
+            @($saved.shopify_webhook_secret_arn, $WebhookSecret),
+            @($saved.shopify_client_credentials_secret_arn, $ClientSecret)
+        )) {
+            if ($match[0] -ne $match[1]) {
+                throw 'Live AWS deployment differs from Terraform state. Stop and reconcile drift.'
+            }
+        }
+        & terraform validate
+        Assert-Exit 'Terraform validate'
+        & terraform plan -no-color "-var-file=$VarsFile" "-out=$PlanPath"
+        Assert-Exit 'Terraform plan'
+        & terraform show -json $PlanPath | Out-File -LiteralPath $PlanJson -Encoding utf8
+        Assert-Exit 'Terraform show JSON'
+        & python -X utf8 $Guard --plan $PlanJson --stage $stage
+        Assert-Exit 'Strict dbt-only Terraform resource review'
+        & terraform show $PlanPath
+        Assert-Exit 'Terraform show'
+        if (-not $Apply) {
+            Write-Host 'PLAN ONLY. Review the exact changes, then rerun with -Apply.'
+            return
+        }
+        $approval = Read-Host 'Type DEPLOY-DBT to apply this exact Terraform plan'
+        if ($approval -cne 'DEPLOY-DBT') { throw 'Apply not approved' }
+        & terraform apply -input=false $PlanPath
+        Assert-Exit 'Terraform apply'
+    }
+    finally { Pop-Location }
+
+    Write-Host 'dbt Terraform release applied. No dbt task was launched.'
+    Write-Host 'Run terraform output -json for ECR, task-definition and security-group identifiers.'
+}
+finally {
+    Pop-Location
+    if ($VarsFile) { Remove-Item -LiteralPath $VarsFile -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $PlanJson) { Remove-Item -LiteralPath $PlanJson -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $StateJson) { Remove-Item -LiteralPath $StateJson -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $PlanPath) { Remove-Item -LiteralPath $PlanPath -Force -ErrorAction SilentlyContinue }
+}
+) {
+                throw 'Refusing an unverified private Redshift VPCE DNS hostname'
+            }
+            $builderArgs += @('--private-host', $PrivateHost)
         }
         & python @builderArgs
         Assert-Exit 'Preserve existing Terraform resources and digest-pinned images'
