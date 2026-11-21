@@ -7,7 +7,7 @@ routes, RDS, Shopify schedules, or Terraform state.
 
 Invoked every five minutes via EventBridge Scheduler. Creates NAT in advance
 of the 08:00 and 16:00 Berlin generator windows. Releases NAT only after
-dependent workloads settle, including the 17:00 lifecycle ECS run.
+dependent workloads settle, including the 16:30 lifecycle ECS run.
 """
 from __future__ import annotations
 
@@ -59,10 +59,10 @@ def can_consider_release(local: datetime, slot: str) -> bool:
     if slot == "morning":
         return minute >= 8 * 60 + 30
     if slot == "afternoon":
-        # 17:00 lifecycle and its webhooks must finish before NAT release.
-        # 17:25 is a lower bound, not a forced shutdown; completion guards apply.
+        # 16:30 lifecycle and its webhooks must finish before NAT release.
+        # 16:55 is a lower bound, not a forced shutdown; completion guards apply.
         # Past midnight still belongs to the preceding afternoon cycle.
-        return minute < 3 * 60 or minute >= 17 * 60 + 25
+        return minute < 3 * 60 or minute >= 16 * 60 + 55
     return True
 
 
@@ -79,7 +79,7 @@ def generation_readiness_window(local: datetime) -> bool:
     """Verify NAT routing ahead of all Shopify/outbound ECS execution windows.
 
     A controller tick between 07:50-08:10, 15:50-16:10, and
-    16:50-17:10 must fail visibly if internet egress is not ready.
+    16:20-16:40 must fail visibly if internet egress is not ready.
     The failure triggers the CloudWatch Lambda Errors alarm.
     """
     minute = local.hour * 60 + local.minute
@@ -88,7 +88,7 @@ def generation_readiness_window(local: datetime) -> bool:
         for start, end in (
             (7 * 60 + 50, 8 * 60 + 10),
             (15 * 60 + 50, 16 * 60 + 10),
-            (16 * 60 + 50, 17 * 60 + 10),
+            (16 * 60 + 20, 16 * 60 + 40),
         )
     )
 
@@ -457,7 +457,7 @@ def handler(event, context):
                 return log("missed_prewarm_window", slot=slot)
             record_warm(table, today, slot)
         response = create_managed_nat(ec2, settings, today, slot)
-        # An unready 07:50/15:50/16:50 preflight must page the operator,
+        # An unready 07:50/15:50/16:20 preflight must page the operator,
         # even when a recovery NAT create request has just been accepted.
         require_outbound_ready(local, ec2, settings["route_tables"], nat)
         return response
