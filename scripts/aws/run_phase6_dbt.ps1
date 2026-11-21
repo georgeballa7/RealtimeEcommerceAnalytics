@@ -43,113 +43,17 @@ try {
     $SecurityGroup = TerraformOutput 'phase6_dbt_security_group_id'
     $SubnetsJson = & terraform output -json application_subnet_ids
     Assert-Exit 'Terraform application subnets'
-    # In Windows PowerShell, piping a JSON array to ConvertFrom-Json can
-    # return the entire array as one pipeline object. Decode directly and
-    # cast to a flat string array before validating ECS network settings.
-    $SubnetValues = ConvertFrom-Json -InputObject (($SubnetsJson | Out-String).Trim())
-    if ($SubnetValues -isnot [System.Array]) {
-        throw 'Terraform application_subnet_ids must be a JSON array'
+    # Windows PowerShell may wrap JSON arrays passed through a pipeline.
+    # Convert directly, then enumerate its array elements explicitly.
+    $ParsedSubnets = ConvertFrom-Json -InputObject (($SubnetsJson | Out-String).Trim())
+    if ($ParsedSubnets -isnot [System.Array]) {
+        throw 'Expected application_subnet_ids to be a JSON array'
     }
-    [string[]]$Subnets = $SubnetValues
+    [string[]]$Subnets = @($ParsedSubnets | ForEach-Object { [string]$_ })
     if ($Subnets.Count -ne 2 -or
         @($Subnets | Select-Object -Unique).Count -ne 2 -or
-        @($Subnets | Where-Object { $_ -notmatch '^subnet-[0-9a-f]{8,}
-    if ($TaskDef -notmatch ':task-definition/ecommerce-phase6-dbt-demo:[0-9]+$' -or
-        $SecurityGroup -notmatch '^sg-[0-9a-f]+$') {
-        throw 'Unexpected dbt task definition or task security group'
-    }
-    $TaskInfoJson = & aws ecs describe-task-definition --task-definition $TaskDef --profile $Profile --region $Region --output json
-    Assert-Exit 'Describe dbt task'
-    $TaskInfo = ($TaskInfoJson | Out-String | ConvertFrom-Json).taskDefinition
-    if ($TaskInfo.status -ne 'ACTIVE' -or @($TaskInfo.containerDefinitions).Count -ne 1 -or
-        $TaskInfo.containerDefinitions[0].name -ne 'phase6-dbt') {
-        throw 'Unexpected deployed dbt ECS task definition'
-    }
-    foreach ($status in @('RUNNING','PENDING')) {
-        $existingJson = & aws ecs list-tasks --cluster $Cluster --family ecommerce-phase6-dbt-demo --desired-status $status --profile $Profile --region $Region --output json
-        Assert-Exit 'Check existing dbt tasks'
-        if (@(($existingJson | Out-String | ConvertFrom-Json).taskArns).Count -gt 0) {
-            throw "Another dbt task is already $status"
-        }
-    }
-    if ($Action -ne 'Build' -and $Scope -ne 'Core') {
-        throw 'Scope All requires -Action Build'
-    }
-    $Command = if ($Action -eq 'Build' -and $Scope -eq 'All') {
-        @('--action', 'build', '--select', '*')
-    } elseif ($Action -eq 'Build') {
-        @('--action','build','--select','+fct_refund_lines','+fct_cancellations')
-    } else {
-        @('--action','auth-check')
-    }
-    Write-Host "dbt task: $TaskDef"
-    Write-Host "Action: $Action; Scope: $Scope"
-    Write-Host "Private subnet count: $($Subnets.Count)"
-    Write-Host "Task security group: $SecurityGroup"
-    Write-Host 'Public IP: DISABLED'
-    if (-not $Execute) {
-        Write-Host 'PREVIEW ONLY. Add -Execute to start one temporary ECS dbt task.'
-        return
-    }
-    $Overrides = @{containerOverrides = @(@{name = 'phase6-dbt'; command = $Command})}
-    $Network = @{awsvpcConfiguration = @{
-        subnets = $Subnets
-        securityGroups = @($SecurityGroup)
-        assignPublicIp = 'DISABLED'
-    }}
-    $TempFile = Join-Path ([IO.Path]::GetTempPath()) ("phase6-dbt-task-" + [guid]::NewGuid().ToString('N') + '.json')
-    $Json = @{containerOverrides = $Overrides.containerOverrides}
-    # The AWS ECS overrides file and network settings are separate JSON options.
-    $OverridesFile = $TempFile
-    $NetworkFile = $TempFile + '.network'
-    [IO.File]::WriteAllText($OverridesFile, ($Json | ConvertTo-Json -Depth 8 -Compress), (New-Object Text.UTF8Encoding($false)))
-    [IO.File]::WriteAllText($NetworkFile, ($Network | ConvertTo-Json -Depth 8 -Compress), (New-Object Text.UTF8Encoding($false)))
-    $OverrideUri = 'file://' + ($OverridesFile -replace '\\', '/')
-    $NetworkUri = 'file://' + ($NetworkFile -replace '\\', '/')
-    $resultJson = & aws ecs run-task --cluster $Cluster --task-definition $TaskDef --launch-type FARGATE --count 1 --overrides $OverrideUri --network-configuration $NetworkUri --profile $Profile --region $Region --output json
-    Assert-Exit 'Start dbt task'
-    $result = $resultJson | Out-String | ConvertFrom-Json
-    if (@($result.failures).Count -gt 0 -or @($result.tasks).Count -ne 1) {
-        throw 'ECS task run was not accepted; review failures'
-    }
-    $Arn = $result.tasks[0].taskArn
-    Write-Host "Started $Action dbt task: $Arn"
-    # ecs wait tasks-stopped has a comparatively short default waiter duration.
-    # Building all marts/tests may exceed it, particularly on a cold Redshift
-    # Serverless workgroup. Poll for at most 55 minutes, matching the Python
-    # dbt runner's 3300-second execution bound, then fail without relaunching.
-    $task = $null
-    for ($attempt = 0; $attempt -lt 165; $attempt++) {
-        $taskJson = & aws ecs describe-tasks --cluster $Cluster --tasks $Arn --profile $Profile --region $Region --output json
-        Assert-Exit 'Poll dbt ECS task status'
-        $rows = @(($taskJson | Out-String | ConvertFrom-Json).tasks)
-        if ($rows.Count -ne 1) { throw 'Expected exactly one ECS dbt task when polling' }
-        $task = $rows[0]
-        if ($task.lastStatus -eq 'STOPPED') { break }
-        if ($task.lastStatus -notin @('PROVISIONING','PENDING','ACTIVATING','RUNNING','DEACTIVATING','STOPPING')) {
-            throw "Unexpected dbt ECS task state: $($task.lastStatus)"
-        }
-        Start-Sleep -Seconds 20
-    }
-    if ($null -eq $task -or $task.lastStatus -ne 'STOPPED') {
-        throw "dbt ECS task has not stopped within 55 minutes: $Arn. Do not launch a duplicate task."
-    }
-    $container = @($task.containers | Where-Object { $_.name -eq 'phase6-dbt' })
-    if ($container.Count -ne 1 -or $null -eq $container[0].exitCode -or
-        [int]$container[0].exitCode -ne 0) {
-        throw "dbt task failed: $Arn. Inspect /ecs/ecommerce-demo/phase6-dbt CloudWatch logs."
-    }
-    Write-Host "dbt $Action completed successfully (container exit 0)."
-}
-finally {
-    Pop-Location
-    if ($TempFile) {
-        Remove-Item -LiteralPath $TempFile -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath ($TempFile + '.network') -Force -ErrorAction SilentlyContinue
-    }
-}
- }).Count -gt 0) {
-        throw "Expected two distinct private application subnet IDs; got $($Subnets.Count)"
+        @($Subnets | Where-Object { $_ -notmatch '^subnet-[0-9a-f]{8,}$' }).Count -gt 0) {
+        throw "Expected two distinct private subnet IDs; got $($Subnets.Count)"
     }
     if ($TaskDef -notmatch ':task-definition/ecommerce-phase6-dbt-demo:[0-9]+$' -or
         $SecurityGroup -notmatch '^sg-[0-9a-f]+$') {
