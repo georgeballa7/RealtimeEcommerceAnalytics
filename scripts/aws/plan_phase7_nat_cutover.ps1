@@ -42,7 +42,7 @@ try {
     Check-Exit 'git status'
     if ($dirty.Count -gt 0) { throw 'Working tree must be clean before plan review' }
 
-    $identity = Read-AwsJson @('sts', 'get-caller-identity')
+    $identity = Read-AwsJson -Arguments @('sts', 'get-caller-identity')
     if ([string]$identity.Account -ne $AccountId) { throw 'Unexpected AWS account' }
 
     New-Item -ItemType Directory -Path $Temp -Force | Out-Null
@@ -77,7 +77,7 @@ try {
         }
         $natId = [string]$natRows[0].values.id
         $allocation = [string]$eipRows[0].values.id
-        $liveNat = Read-AwsJson @('ec2', 'describe-nat-gateways', '--nat-gateway-ids', $natId)
+        $liveNat = Read-AwsJson -Arguments @('ec2', 'describe-nat-gateways', '--nat-gateway-ids', $natId)
         $matches = @($liveNat.NatGateways)
         if ($matches.Count -ne 1 -or $matches[0].State -ne 'available') {
             throw 'Static NAT must currently be available'
@@ -90,7 +90,7 @@ try {
         })
         if ($routeState.Count -ne 2) { throw 'Expected two application route tables' }
         $routeIds = @($routeState | ForEach-Object { [string]$_.values.id })
-        $liveRoutes = Read-AwsJson (@('ec2', 'describe-route-tables', '--route-table-ids') + $routeIds)
+        $liveRoutes = Read-AwsJson -Arguments (@('ec2', 'describe-route-tables', '--route-table-ids') + $routeIds)
         if (@($liveRoutes.RouteTables).Count -ne 2) { throw 'Application route table count changed' }
         foreach ($table in $liveRoutes.RouteTables) {
             $default = @($table.Routes | Where-Object { $_.DestinationCidrBlock -eq '0.0.0.0/0' })
@@ -107,7 +107,7 @@ try {
             @{ Name = 'ecommerce-demo-phase5-afternoon'; Cron = 'cron(0 16 * * ? *)' },
             @{ Name = 'ecommerce-demo-phase5-lifecycle'; Cron = 'cron(0 22 * * ? *)' }
         )) {
-            $schedule = Read-AwsJson @('scheduler', 'get-schedule', '--name', $entry.Name)
+            $schedule = Read-AwsJson -Arguments @('scheduler', 'get-schedule', '--name', $entry.Name)
             if ($schedule.State -ne 'ENABLED' -or
                 $schedule.ScheduleExpression -ne $entry.Cron -or
                 $schedule.ScheduleExpressionTimezone -ne 'Europe/Berlin') {
