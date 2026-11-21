@@ -122,6 +122,8 @@ resource "aws_vpc_security_group_ingress_rule" "redshift_from_phase6_dbt" {
 }
 
 resource "aws_ecs_task_definition" "phase6_dbt" {
+  # Keep externally referenced immutable revisions registered during state reconciliation.
+  skip_destroy             = true
   count                    = var.enable_phase6_dbt_runner && var.enable_redshift_warehouse && var.phase6_dbt_image != "" ? 1 : 0
   family                   = "ecommerce-phase6-dbt-${var.environment}"
   requires_compatibilities = ["FARGATE"]
