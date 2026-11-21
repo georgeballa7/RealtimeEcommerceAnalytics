@@ -6,6 +6,7 @@ of order creation and S3 idempotency. Preview unless --apply is explicitly set.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -20,7 +21,7 @@ def build_command(slot: str, now: datetime, apply: bool = False, smoke_run_id: s
         raise ValueError("Invalid slot")
     local = now.astimezone(ZoneInfo("Europe/Berlin"))
     run_id = f"live-{local:%Y%m%d}-{slot}"
-    count = 20 if slot == "morning" else 25
+    count = 100 if slot == "morning" else 150
     if smoke_run_id is not None:
         if not re.fullmatch(r"smoke-[a-z0-9-]{4,58}", smoke_run_id):
             raise ValueError("Unsafe smoke run ID")
@@ -43,6 +44,43 @@ def assert_deployment_ready():
         raise RuntimeError("Phase 5 deployment is not ready for Shopify mutations")
 
 
+
+def publish_completed_slot(bucket: str, run_id: str, slot: str) -> None:
+    """Immutable generation-complete marker; 22:00 lifecycle is independent."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    key = f"simulation/phase5/slots/v1/{run_id}.json"
+    data = {"schema_version": 1, "run_id": run_id, "slot": slot,
+            "generation": "complete"}
+    s3 = boto3.client("s3")
+    try:
+        s3.put_object(Bucket=bucket, Key=key, IfNoneMatch="*",
+                      Body=json.dumps(data, sort_keys=True).encode(),
+                      ContentType="application/json")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
+            raise
+        existing = json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
+        if existing != data:
+            raise RuntimeError("Existing slot completion marker conflicts with current run") from exc
+
+
+def run_generation_slot(slot: str, now: datetime, *, apply: bool,
+                        smoke_run_id: str | None = None) -> int:
+    """Create orders at 08:00/16:00; leave cancellations/refunds for 22:00."""
+    code = subprocess.call(build_command(slot, now, apply=apply,
+                                         smoke_run_id=smoke_run_id))
+    if code or not apply or smoke_run_id:
+        return code
+    run_id = f"live-{now.astimezone(ZoneInfo('Europe/Berlin')):%Y%m%d}-{slot}"
+    bucket = os.environ.get("S3_LANDING_BUCKET")
+    if not bucket:
+        raise RuntimeError("Cannot publish generation readiness without S3 bucket")
+    publish_completed_slot(bucket, run_id, slot)
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--slot", choices=("morning", "afternoon"), required=True)
@@ -52,8 +90,9 @@ def main():
     # Host controls the task; never infer an apply from the environment.
     if args.apply:
         assert_deployment_ready()
-    cmd = build_command(args.slot, datetime.now(ZoneInfo("UTC")), apply=args.apply, smoke_run_id=args.smoke_run_id)
-    raise SystemExit(subprocess.call(cmd))
+    code = run_generation_slot(args.slot, datetime.now(ZoneInfo("UTC")),
+                             apply=args.apply, smoke_run_id=args.smoke_run_id)
+    raise SystemExit(code)
 
 
 if __name__ == "__main__":

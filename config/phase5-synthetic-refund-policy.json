@@ -1,0 +1,16 @@
+{
+  "version": "phase5-synthetic-refund-policy-v2",
+  "mode": "development_store_synthetic_manual_or_test_only",
+  "currency": "GBP",
+  "probability_percent": 5,
+  "max_delay_days": 2,
+  "refund_quantity_per_order": 1,
+  "max_refunds_per_order": 1,
+  "restock_type": "NO_RESTOCK",
+  "notify_customer": false,
+  "allow_test_transactions": true,
+  "block_non_test_transactions": true,
+  "allow_verified_synthetic_manual_transactions": true,
+  "allowed_synthetic_manual_gateway": "manual",
+  "require_generator_note_and_tags": true
+}

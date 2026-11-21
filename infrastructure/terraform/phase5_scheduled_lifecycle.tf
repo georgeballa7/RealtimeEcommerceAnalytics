@@ -1,6 +1,12 @@
 # Phase 5 producer/lifecycle schedules (enabled in the same deployment).
 # Requires the existing phase5_generator.tf resources in the GitHub repository.
 # Generator container uses Dockerfile.phase5-generator and slot runner.
+variable "enable_phase5_legacy_lifecycle_schedule" {
+  description = "Enable standalone 22:00 nightly lifecycle for the development store. Keep enabled until an explicitly reviewed replacement is operational."
+  type        = bool
+  default     = true
+}
+
 variable "phase5_lifecycle_image" {
   description = "Immutable lifecycle ECS digest; empty prevents lifecycle ECS task and schedule"
   type        = string
@@ -41,7 +47,9 @@ resource "aws_iam_role_policy" "phase5_lifecycle_journal" {
         Action = ["s3:ListBucket"]
         Resource = aws_s3_bucket.landing.arn
         Condition = { StringLike = { "s3:prefix" = [
-          "simulation/phase5/live/v1/", "simulation/phase5/live/v1/*"
+          "simulation/phase5/live/v1/", "simulation/phase5/live/v1/*",
+          "simulation/phase5/lifecycle/v1/", "simulation/phase5/lifecycle/v1/*",
+          "simulation/phase5/slots/v1/", "simulation/phase5/slots/v1/*"
         ] } }
       },
       {
@@ -53,6 +61,11 @@ resource "aws_iam_role_policy" "phase5_lifecycle_journal" {
         Effect = "Allow"
         Action = ["s3:GetObject", "s3:PutObject"]
         Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/lifecycle/v1/*"
+      },
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${aws_s3_bucket.landing.arn}/simulation/phase5/slots/v1/*"
       }
     ]
   })
@@ -138,8 +151,8 @@ resource "aws_iam_role_policy" "phase5_scheduler" {
 
 locals {
   phase5_generation_slots = {
-    morning = { cron = "cron(0 8 * * ? *)", count = 20 }
-    afternoon = { cron = "cron(0 16 * * ? *)", count = 25 }
+    morning = { cron = "cron(0 8 * * ? *)", count = 100 }
+    afternoon = { cron = "cron(0 16 * * ? *)", count = 150 }
   }
 }
 
@@ -174,17 +187,17 @@ resource "aws_scheduler_schedule" "phase5_generation" {
 }
 
 resource "aws_scheduler_schedule" "phase5_lifecycle" {
-  count = var.phase5_lifecycle_image != "" ? 1 : 0
+  count = var.phase5_lifecycle_image != "" && var.enable_phase5_legacy_lifecycle_schedule ? 1 : 0
   name = "ecommerce-${var.environment}-phase5-lifecycle"
   state = "ENABLED"
-  schedule_expression = "cron(0 18 * * ? *)"
+  schedule_expression = "cron(0 22 * * ? *)"
   schedule_expression_timezone = "Europe/Berlin"
   flexible_time_window { mode = "OFF" }
   target {
     arn = aws_ecs_cluster.ecommerce.arn
     role_arn = aws_iam_role.phase5_scheduler.arn
     input = jsonencode({
-      containerOverrides = [{ name = "phase5-lifecycle", command = ["--apply", "--confirm-apply"] }]
+      containerOverrides = [{ name = "phase5-lifecycle", command = ["--apply", "--confirm-apply", "--require-settled", "--commit-nightly", "--limit", "500"] }]
     })
     ecs_parameters {
       task_definition_arn = aws_ecs_task_definition.phase5_lifecycle[0].arn

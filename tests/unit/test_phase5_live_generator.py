@@ -17,10 +17,10 @@ def test_deterministic_order_selection():
     variants = [{"id":f"gid://shopify/ProductVariant/{i}", "sku":f"S{i}", "price":"1.25"}
                 for i in range(10)]
     customers = [f"gid://shopify/Customer/{i}" for i in range(100)]
-    a = mod.make_orders(variants, customers, "daily-20261119", 45, 20261118, POLICY)
-    b = mod.make_orders(variants, customers, "daily-20261119", 45, 20261118, POLICY)
+    a = mod.make_orders(variants, customers, "daily-20261119", 150, 20261118, POLICY)
+    b = mod.make_orders(variants, customers, "daily-20261119", 150, 20261118, POLICY)
     assert a == b
-    assert len(a) == 45 and all(x["lines"] for x in a)
+    assert len(a) == 150 and all(x["lines"] for x in a)
 
 def test_price_drift_stops_without_mutation():
     p = [{"variants":{"nodes":[{"id":"v","sku":"A","price":"9.00"}],

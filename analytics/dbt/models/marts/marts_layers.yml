@@ -1,0 +1,7 @@
+version: 2
+
+groups:
+  - name: dimensional_warehouse
+    owner:
+      name: RealtimeEcommerceAnalytics
+    description: "Conformed Redshift warehouse source of truth for sales fact and dimension models."

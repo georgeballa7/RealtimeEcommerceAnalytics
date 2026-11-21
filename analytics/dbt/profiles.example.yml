@@ -1,0 +1,17 @@
+# Copy locally to ~/.dbt/profiles.yml. Never commit credentials or tokens.
+# Redshift Serverless IAM auth via dbt-redshift's IAM plugin or a short-lived
+# get-credentials session. Do not use a permanently embedded admin password.
+ecommerce_redshift:
+  target: dev
+  outputs:
+    dev:
+      type: redshift
+      host: "{{ env_var('REDSHIFT_HOST') }}"
+      port: 5439
+      dbname: analytics
+      schema: analytics
+      user: "{{ env_var('REDSHIFT_USER') }}"
+      password: "{{ env_var('REDSHIFT_PASSWORD') }}"
+      threads: 2
+      sslmode: require
+      connect_timeout: 30

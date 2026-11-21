@@ -1,0 +1,83 @@
+# Phase 6 — Live Shopify Bronze-to-Silver contract and Redshift staging reconciliation
+
+Status: feature-branch implementation; Glue job and automatic trigger NOT yet deployed.
+
+## Processing boundary
+
+Phase 5 Shopify -> webhook inbox / RDS projector -> confirmed RDS ingestion boundary
+-> Glue PySpark JDBC extraction -> versioned S3 Bronze Parquet
+-> Glue DQ / identity checks / quarantine -> S3 Silver JSONL.gz plus manifest
+-> Redshift silver_staging (only committed Silver manifests) -> dbt staging/marts.
+
+The original Pandas rules live in src/ecommerce/pipelines/silver/historical.py,
+and the historical audit rules in src/ecommerce/pipelines/silver/audit.py.
+This is a **policy port**, not an import of the Pandas implementation.
+
+## Validated source-to-target column compatibility
+
+The column ordering and major Redshift types below follow
+analytics/redshift/silver_staging_schema.sql, which defines these existing
+unpopulated Shopify tables (currently still under raw in AWS until the
+separate guarded schema rename is explicitly approved and applied).
+
+| Spark Silver table | Redshift silver_staging target | Columns | Matching data types |
+| --- | --- | ---: | --- |
+| shopify_live_order | shopify_live_order | 13 | string/VARCHAR, long/BIGINT, timestamp/TIMESTAMPTZ, DECIMAL(18,2), boolean |
+| shopify_live_order_line | shopify_live_order_line | 9 | string/VARCHAR, long/BIGINT, int/INT, DECIMAL(18,2), timestamp |
+| shopify_live_refund | shopify_live_refund | 6 | string/VARCHAR, long/BIGINT, DECIMAL(18,2), timestamp |
+| shopify_live_refund_line | shopify_live_refund_line | 6 | string/VARCHAR, long/BIGINT, int/INT, DECIMAL(18,2) |
+| shopify_customer_identity | shopify_customer_identity | 7 | string/VARCHAR, timestamp |
+
+The Silver stage must enforce VARCHAR limits before Redshift COPY, preserve
+money as DECIMAL rather than floats, retain timestamps in UTC, and use
+source-specific composite business keys.
+
+## Reused historical policy concepts
+
+- Immutable S3 Bronze evidence and a manifest written last.
+- Reject null/invalid primary identifiers; never infer a missing customer.
+- Stable customer/order/product identities, with Shopify ID provenance retained.
+- Exact money types; validate negative amounts, order quantities, and refunds.
+- Preserve adjustments/refunds separately from positive sales.
+- Test primary key uniqueness, parent-child relations, and source-vs-accepted-
+  plus-quarantined reconciliation before committing Silver.
+- Never silently discard a rejected record.
+
+**Historical-specific rule not reused**: Online Retail II two-worksheet
+overlap deduplication does not apply to Shopify RDS tables.
+
+**Source mapping is not automatically identity reconciliation**:
+Historical synthetic orders have canonical IDs based on the cleaned historical
+customer and stock-code maps; Shopify live records use Shopify IDs. The
+verified Shopify-to-canonical customer/variant mappings must be checked against
+the catalog and identity-sync evidence before unifying the star-schema facts.
+
+## Operational restrictions
+
+- Run Spark **only** after Phase 5 RDS projection has completed and application
+  writes are quiescent; scheduled generation time alone is insufficient.
+- Full JDBC table reads are not a PostgreSQL transaction-wide snapshot.
+  Cross-table reconciliation is a necessary but insufficient consistency check
+  if concurrent updates are possible. For strict transactional consistency,
+  introduce an explicit source snapshot / coordinated CDC boundary before
+  enabling concurrent production-scale extraction.
+- Use one JDBC reader per table initially to avoid saturating the small RDS.
+- Never run the job when RDS is stopping/restarting. The Phase 5 controller\n  must hold an explicit RDS-in-use lease for the entire Glue job; its current\n  idle shutdown logic has not yet been updated to recognize Glue execution.\n- Confirm the source table set and all five types from the actual PostgreSQL\n  catalog, and keep a stable no-writes boundary across the full extract.
+- No automatic triggers until an end-to-end manual run is verified.
+- All Glue AWS resources are Terraform opt-in; enable only after an inspected
+  plan preserves the existing Phase 5 generator, controller and schedules.
+- The old Python exporter is superseded for new runs; do not start its ECS task.
+- The legacy Redshift loader's direct unvalidated live-manifest option remains
+  blocked until it is replaced by a reviewed Silver manifest loader.
+- Migrating the Redshift schema is an independent database operation:
+  `ALTER SCHEMA "raw" RENAME TO silver_staging;`, only after preview.
+
+## Open pre-production checks
+
+1. Validate the Spark script with local unit fixtures and AWS Glue syntax/permissions.
+2. Confirm RDS source-column types against the actual PostgreSQL catalog.
+3. Confirm source money precision, text lengths and accepted identity status values.
+4. Run a manual Glue job after projector success, inspect quarantine and row counts.
+5. Implement and test Silver-manifest-to-Redshift transactional COPY and dbt tests.
+6. Connect an ingestion-completion signal to the on-demand Glue job, with
+   idempotent run identifiers, back-pressure and AWS budget monitoring.
