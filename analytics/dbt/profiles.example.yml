@@ -14,4 +14,4 @@ ecommerce_redshift:
       password: "{{ env_var('REDSHIFT_PASSWORD') }}"
       threads: 2
       sslmode: require
-      connect_timeout: 30
+      connect_timeout: 120
