@@ -220,7 +220,11 @@ def review_plan(plan: dict) -> dict:
         if actions == ["no-op"]:
             continue
         if resource.get("mode") == "data" and actions == ["read"]:
-            if address != "data.archive_file.phase6_nat_lifecycle[0]":
+            allowed = {
+                "data.archive_file.phase6_nat_lifecycle[0]",
+                "data.aws_availability_zones.available",
+            }
+            if address not in allowed:
                 raise UnsafePlan("Unexpected Terraform data-source read: " + address)
             continue
         if address in seen:
