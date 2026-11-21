@@ -194,7 +194,9 @@ def processing_day(local, slot):
 
 def slot_for_time(local):
     """Which generator slot can advance in the current Berlin local time window?"""
-    if local.hour == 16 and local.minute < 30:\n        return None  # Lifecycle has not started; never snapshot early.\n    return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
+    if local.hour == 16 and local.minute < 30:
+        return None  # Lifecycle has not started; never snapshot early.
+    return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
 
 
 def handler(event, context):
