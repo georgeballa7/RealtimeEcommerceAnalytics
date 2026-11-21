@@ -1,42 +1,59 @@
-# Tableau ↔ private Redshift Serverless: connection checklist
+# Tableau Desktop Free -> private Redshift Serverless
 
-## Current verified status (2026-11-21)
+Status, 2026-11-21: AWS access stack deployed and Redshift TCP reachability verified. The **local Tableau Desktop application login remains untested**.
 
-**Database setup completed in AWS:**
-- Redshift database `analytics`, schema `analytics_bi`
-- Seven curated SELECT views of sales and churn metrics
-- Role `tableau_analytics_reader`; scoped SELECT on all existing and future `analytics_bi` tables and views
-- Read query against `analytics_bi.v_churn_model_metrics` succeeds (ROC-AUC 0.6398, 7,524 validation examples)
-- No Tableau identity mapped to the role yet
-- Warehouse private; inbound Redshift TCP 5439 currently from dbt ECS SG only
-- No SSM bastion, VPN, Tableau Cloud private connection, or Bridge network path deployed
-- No Redshift public exposure or new billable networking provisioned
+## Verified
 
-## Recommended local Desktop connection
+- CloudFormation stack: ecommerce-tableau-ssm-access-demo, CREATE_COMPLETE
+- On-demand t4g.micro EC2: i-04fa8d5f5592ca1e7; encrypted 8 GiB gp3 disk. Instance stopped after verification. EBS storage costs remain while stopped.
+- Amazon Linux 2023 SSM agent version 3.3.5828.0 online in successful test. AWS Run Command resolved the private warehouse and reached TCP 5439.
+- Access SG sg-01417e47617797488: NO ingress. Scoped outbound 443 to Systems Manager, 5439 to Redshift, VPC DNS. Redshift SG only allows this access SG and existing dbt SG.
+- Redshift IAM role: ecommerce-tableau-bi-readonly-demo, trusted by existing george-admin IAM user; restricted to temporary credentials for analytics warehouse.
+- Redshift database principal: IAMR:ecommerce-tableau-bi-readonly-demo, PASSWORD DISABLE, non-superuser; BI read access true, direct analytics_marts read access false.
+- Seven deployed live SQL views in analytics_bi (4,382 current churn scores). These are **views**, not materialized copies.
+- This CloudFormation stack is separate from Terraform ingestion state to avoid disrupting the scheduled batch. Source: infrastructure/cloudformation/tableau-ssm-on-demand-access.json.
 
-1. Install [Tableau Desktop Free Edition](https://www.tableau.com/pricing) (live DB connections supported, local-only publishing) and [Amazon Redshift ODBC 2.x driver](https://help.tableau.com/current/pro/desktop/en-us/examples_amazonredshift.htm).
-2. Define a secure on-demand private VPC connectivity solution; for a low-frequency local Windows session use a small EC2 Session Manager port-forwarding bastion. The required Terraform resource and SG + IAM design must be cost-reviewed and deployed **before** attempting live login.
-3. Create a non-admin Redshift login or IAM-federated principal; assign ONLY `tableau_analytics_reader`. Never reuse Redshift admin secret for BI.
-4. Use native Redshift connection in Tableau Desktop, SSL required, database `analytics`, select schema `analytics_bi`. Test `SELECT * FROM analytics_bi.v_churn_model_metrics;`.
-5. Build sheets from `v_churn_risk_segments`, `v_churn_monthly_labels`, `v_churn_model_calibration`, `v_churn_risk_by_recency`, `v_monthly_sales` and `v_customer_churn_scores`.
-6. Save workbook locally with live connection. Shut down temporary SSM instance after analytics work. Live Tableau needs tunnel running; screenshots and extracts do not.
-7. Future publishing: Tableau Cloud Creator/Professional + private-connected Bridge or Outbound Private Connect. Requires separate site and licensing; do not enable always-on cost without review.
+## Install on Windows
 
-Network example **after** bastion deployment:
+Install Tableau Desktop Free Edition and Redshift ODBC driver 2.x, AWS CLI v2 and AWS Session Manager Plugin. Confirm the local AWS CLI profile ecommerce-admin works.
 
-```powershell
-aws ssm start-session `
-  --profile ecommerce-admin `
-  --region eu-central-1 `
-  --target <bastion-instance-id> `
-  --document-name AWS-StartPortForwardingSessionToRemoteHost `
-  --parameters '{"host":["ecommerce-analytics-demo.825414820081.eu-central-1.redshift-serverless.amazonaws.com"],"portNumber":["5439"],"localPortNumber":["15439"]}'
-```
+Run from project root in PowerShell:
 
-While session stays open, native Tableau hostname `localhost`, port `15439` with appropriate TLS/ODBC settings. IAM for `StartSession` must be narrowly scoped; use no inbound SSH. Real implementation and SSL test remain to be done.
+Step 1. Obtain temporary, one-hour read-only database credentials:
 
-References:
-- [Tableau Redshift connector](https://help.tableau.com/current/pro/desktop/en-us/examples_amazonredshift.htm)
-- [Tableau Desktop Free vs Professional](https://help.tableau.com/current/pro/desktop/en-us/desktop_comparison.htm)
-- [Private Redshift via Tableau Bridge](https://help.tableau.com/current/online/en-us/to_bridge_vpc.htm)
-- [AWS Redshift GRANT RBAC](https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html)
+    .\scripts\tableau\get-tableau-credentials.ps1
+
+The command creates a local role-assumption AWS profile named tableau-ecommerce, prints the temporary database username, and copies a short-lived password to the Windows clipboard. No static DB password or AWS IAM key is created.
+
+Step 2. In a second PowerShell window, create the private TCP tunnel:
+
+    .\scripts\tableau\start-tableau-tunnel.ps1
+
+The script starts the dedicated EC2 instance as needed, waits for SSM to come online, and keeps port forwarding open. It attempts to stop EC2 when the session exits. If necessary, stop it explicitly:
+
+    .\scripts\tableau\stop-tableau-tunnel.ps1
+
+## Tableau Desktop connection
+
+Connect -> To a Server -> Amazon Redshift.
+
+- Host: localhost
+- Port: 15439
+- Database: analytics
+- Username: returned by credential script (expected IAMR:ecommerce-tableau-bi-readonly-demo)
+- Password: paste from clipboard (expires after one hour)
+- SSL: enabled
+- Schema: analytics_bi
+
+Start with view v_churn_model_metrics, then v_churn_risk_segments, v_churn_model_calibration, v_churn_monthly_labels, v_monthly_sales and v_customer_churn_scores.
+
+An ODBC connection to localhost can conflict with strict TLS server-name verification; check the Tableau/ODBC driver settings during the first connection. Keep encrypted transport, and do not expose the private Redshift workgroup to the internet as a workaround.
+
+This ChatGPT conversation cannot directly drive your locally installed Tableau Desktop GUI. I can maintain the warehouse, scripts, model and architecture; you operate or test the local Tableau connection, or use a product mode with supported computer control.
+
+Security: do not publish pseudonymous customer-level data to Tableau Public. Use non-admin IAM credentials for BI. Do not leave the EC2 host running.
+
+Docs:
+- https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html
+- https://help.tableau.com/current/pro/desktop/en-us/examples_amazonredshift.htm
+- https://docs.aws.amazon.com/redshift/latest/mgmt/serverless-iam-credentials.html

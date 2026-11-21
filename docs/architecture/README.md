@@ -25,11 +25,11 @@ flowchart LR
   marts --> churn[Redshift analytics_ml SQL churn classifier]
   churn --> bi[Redshift analytics_bi curated read-only views]
   marts --> bi
-  bi -. private Redshift TCP 5439 .-> access[Private network access, not provisioned]
+  bi -. private Redshift TCP 5439 .-> access[On-demand SSM EC2 private TCP tunnel - deployed]
   access -.-> tableau[Tableau Desktop / Tableau Bridge]
 ```
 
-The physical private Tableau network access path is **not deployed**. Current Redshift workgroup `ecommerce-analytics-demo` is private (`publiclyAccessible=false`), VPC `vpc-076127eb4c8bb7437`, port `5439`, security group `sg-0a2af03c0dda1e8fc`. It currently only permits inbound TCP 5439 from the dbt ECS security group `sg-0d06aade34183743b`.
+The AWS-side private Tableau access path is now **deployed** as CloudFormation stack ecommerce-tableau-ssm-access-demo, with no inbound ports; the on-demand SSM agent successfully connected to the private Redshift TCP 5439 endpoint. Local Windows Tableau testing remains outstanding. Current Redshift workgroup `ecommerce-analytics-demo` is private (`publiclyAccessible=false`), VPC `vpc-076127eb4c8bb7437`, port `5439`, security group `sg-0a2af03c0dda1e8fc`. It currently only permits inbound TCP 5439 from the dbt ECS security group `sg-0d06aade34183743b`.
 
 Operational notes: ECS generator at **08:00 and 16:00 Europe/Berlin**, scheduled on-demand NAT prewarm at **07:30 and 15:30**, evening lifecycle at **22:00**. Database is allowed to stop between batches. Both application private route tables preserve S3 gateway endpoint routes during NAT off periods. Verify first end-to-end dynamic NAT warm/teardown cycle independently.
 
@@ -45,13 +45,13 @@ Operational notes: ECS generator at **08:00 and 16:00 Europe/Berlin**, scheduled
 - `v_customer_churn_scores` — pseudonymous customer-level scores
 - `v_monthly_sales` — sales month, order source and net GBP
 
-A database role `tableau_analytics_reader` exists with `USAGE` on `analytics_bi` and `SELECT` on its seven current views and its future tables/views. **No database login identity has yet been mapped to that role, and Tableau is not live-connected.** Never connect Tableau as the Redshift administrator.
+A database role `tableau_analytics_reader` exists with `USAGE` on `analytics_bi` and `SELECT` on its seven current views and its future tables/views. The non-superuser IAMR:ecommerce-tableau-bi-readonly-demo principal is granted this read-only role; Tableau Desktop on Windows has not yet been tested. Never connect Tableau as the Redshift administrator.
 
 SQL installation/reproducibility: `scripts/redshift/tableau_bi_views.sql`; churn training: `scripts/redshift/train_churn_naive_bayes.sql`. SQL model is a learning baseline on synthetic data, ROC-AUC about **0.640**; do not interpret its churn scores as calibrated probabilities for real customer interventions.
 
 ## Tableau connection design options
 
-**Recommended first integration (Tableau Desktop Free):** Install Tableau Desktop Free Edition and the AWS Redshift ODBC 2.x driver on Windows. For a live private connection, deploy **only when needed** a small SSM-managed EC2 access instance in an existing public subnet (with outbound internet, **no inbound SSH/RDP**). Use AWS Systems Manager Session Manager local port forwarding to the private Redshift DNS/5439, then open Tableau to `localhost:15439` with required TLS and read-only login. For correctness, ensure the ODBC connector supports the loopback endpoint without TLS hostname-verification failures; production clients should use a trusted hostname. The SSM instance and SG rules **have not been provisioned** and incur EC2/EBS/public-IP costs if deployed. Provision with Terraform, restricted IAM StartSession, and explicit session start/stop, avoiding new always-on NAT/VPN charges.
+**Recommended first integration (Tableau Desktop Free):** Install Tableau Desktop Free Edition and the AWS Redshift ODBC 2.x driver on Windows. For a live private connection, deploy **only when needed** a small SSM-managed EC2 access instance in an existing public subnet (with outbound internet, **no inbound SSH/RDP**). Use AWS Systems Manager Session Manager local port forwarding to the private Redshift DNS/5439, then open Tableau to `localhost:15439` with required TLS and read-only login. For correctness, ensure the ODBC connector supports the loopback endpoint without TLS hostname-verification failures; production clients should use a trusted hostname. The SSM instance, IAM roles and SG rules have been provisioned through a separate CloudFormation stack (not Terraform) without any new NAT/VPN. The instance is stopped after tests; start and stop it via the PowerShell scripts. EBS still accrues storage charges.
 
 **Future enterprise publishing (Tableau Cloud):** A Tableau Bridge agent with network access to the VPC, or Tableau Cloud Outbound Private Connect for Redshift, provides a secure private path. Bridge itself has no extra license fee beyond a qualifying Tableau Cloud site, but running the agent and cloud licensing may incur cost. A Bridge client on a laptop without private VPC connectivity **cannot** access the warehouse. Keep the workgroup private; do not temporarily publish Redshift to `0.0.0.0/0` as a shortcut. Tableau Desktop Free Edition can connect live locally but **cannot publish to Tableau Cloud or Server**.
 
@@ -71,3 +71,8 @@ Before declaring Tableau integrated: provision/verify private path, establish a 
 ## Application design note
 
 The domain/application boundaries in original application code are a separate concern from AWS infrastructure; preserve domain decoupling when refactoring. Do not describe the deployed runtime as Databricks, Kinesis or Kubernetes without checking the actual current deployment.
+
+
+## Verified Tableau private-access deployment (21 November 2026)
+
+Infrastructure source: infrastructure/cloudformation/tableau-ssm-on-demand-access.json. Local Windows guide: docs/tableau_redshift_connectivity.md. This separate access stack manages EC2 i-04fa8d5f5592ca1e7, IAM-based Redshift readonly login, SSM remote-host port forwarding and no-open-inbound SG rules. AWS network test to Redshift 5439 succeeded; local Tableau Desktop connection remains unverified. Stopped host costs EBS only, plus usual warehouse costs when queried.
