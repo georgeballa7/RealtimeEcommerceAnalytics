@@ -80,3 +80,12 @@ def test_release_scripts_use_phase7_branch_and_exact_plan_gate():
     assert "Preserve existing Terraform resources" in deploy
 
 
+
+
+def test_deployed_vpc_az_provider_lookup_is_read_only_and_allowed():
+    candidate = changes(guard.FOUNDATION)
+    candidate["resource_changes"].append({
+        "address": "data.aws_availability_zones.available",
+        "mode": "data", "change": {"actions": ["read"]},
+    })
+    assert guard.validate(candidate, "foundation")["create_count"] == 8
