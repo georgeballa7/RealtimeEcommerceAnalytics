@@ -10,7 +10,12 @@ import json
 import re
 from pathlib import Path
 
-from scripts.aws.phase7_nat_cutover_plan import UnsafePlan, snapshot_vars
+# Imported both as a package in pytest and as a sibling script when the
+# PowerShell rollout invokes this file from infrastructure/terraform.
+if __package__:
+    from .phase7_nat_cutover_plan import UnsafePlan, snapshot_vars
+else:
+    from phase7_nat_cutover_plan import UnsafePlan, snapshot_vars
 
 
 def dbt_vars(state: dict, account: str, pinned_image: str) -> dict:
