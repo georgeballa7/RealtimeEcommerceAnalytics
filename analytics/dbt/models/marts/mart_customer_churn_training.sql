@@ -39,9 +39,13 @@ features as (
                       and o.order_timestamp_utc < p.as_of_date then o.current_gbp else 0 end),0)
        as spend_90d_gbp,
     count(case when o.order_timestamp_utc < p.as_of_date then 1 end) as lifetime_order_count,
-    datediff(day,max(case when o.order_timestamp_utc < p.as_of_date
-                          then o.order_timestamp_utc end),p.as_of_date)
-       as recency_days,
+    -- Both DATEDIFF operands must use the same temporal type in Redshift.
+    -- Recency is a calendar-day feature, so explicit DATE operands also
+    -- avoid a TIMESTAMPTZ versus TIMESTAMP overload error.
+    datediff(day,
+             cast(max(case when o.order_timestamp_utc < p.as_of_date
+                           then o.order_timestamp_utc end) as date),
+             cast(p.as_of_date as date)) as recency_days,
     count(case when o.order_timestamp_utc >= p.as_of_date
                and o.order_timestamp_utc < dateadd(day,30,p.as_of_date) then 1 end)
        as orders_in_next_30d
