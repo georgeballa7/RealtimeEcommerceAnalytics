@@ -89,3 +89,12 @@ def test_deployed_vpc_az_provider_lookup_is_read_only_and_allowed():
         "mode": "data", "change": {"actions": ["read"]},
     })
     assert guard.validate(candidate, "foundation")["create_count"] == 8
+
+def test_phase7_dbt_foundation_omits_empty_optional_image_argument():
+    """First-stage PowerShell must not pass an empty --pinned-image to argparse."""
+    deploy = (ROOT / "scripts/aws/deploy_phase6_dbt.ps1").read_text()
+    assert "$builderArgs = @('-X', 'utf8', $VarsBuilder" in deploy
+    assert "if ($PinnedImage -ne '') {" in deploy
+    assert "$builderArgs += @('--pinned-image', $PinnedImage)" in deploy
+    assert "& python @builderArgs" in deploy
+    assert "--account $AccountId --pinned-image $PinnedImage" not in deploy
