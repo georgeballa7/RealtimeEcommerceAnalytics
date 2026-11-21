@@ -23,7 +23,7 @@ from botocore.exceptions import ClientError
 TAG_VALUE = "phase6-dynamic-nat"
 BERLIN = ZoneInfo("Europe/Berlin")
 GLUE_ACTIVE = {"STARTING", "RUNNING", "STOPPING", "WAITING"}
-TERMINAL_PHASES = {"dispatched", "completed", "failed", "warehouse_failed"}
+TERMINAL_PHASES = {"completed"}
 LOCK_ID = "phase6-nat-lifecycle-lock"
 LEASE_SECONDS = 90
 QUIET_SECONDS = 20 * 60
@@ -60,9 +60,9 @@ def can_consider_release(local: datetime, slot: str) -> bool:
         return minute >= 8 * 60 + 30
     if slot == "afternoon":
         # 16:30 lifecycle and its webhooks must finish before NAT release.
-        # 16:55 is a lower bound, not a forced shutdown; completion guards apply.
+        # From 16:30, release immediately when lifecycle, warehouse, dbt and inactivity guards pass.
         # Past midnight still belongs to the preceding afternoon cycle.
-        return minute < 3 * 60 or minute >= 16 * 60 + 55
+        return minute < 3 * 60 or minute >= 16 * 60 + 30
     return True
 
 
