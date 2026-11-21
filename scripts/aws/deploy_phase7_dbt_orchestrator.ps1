@@ -74,7 +74,7 @@ try {
         & aws lambda add-permission --function-name $Name --statement-id $Sid --action lambda:InvokeFunction --principal events.amazonaws.com --source-arn $RuleArn --region $Region --profile $Profile --output json | Out-Null
         Check "Allow rule $Rule"
         $TargetFile = Join-Path $Temp ($Rule + '.json')
-        [IO.File]::WriteAllText($TargetFile,(@(@{Id='dbt-reconciler';Arn=$Arn}) | ConvertTo-Json -Depth 4 -Compress),(New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText($TargetFile,(ConvertTo-Json -InputObject @(@{Id='dbt-reconciler';Arn=$Arn}) -Depth 4 -Compress),(New-Object Text.UTF8Encoding($false)))
         $TargetUri = 'file://' + ($TargetFile -replace '\\','/')
         $Response = (& aws events put-targets --rule $Rule --targets $TargetUri --region $Region --profile $Profile --output json | Out-String | ConvertFrom-Json)
         Check "Attach rule $Rule"
