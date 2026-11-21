@@ -104,8 +104,22 @@ def test_ecs_runner_decodes_subnet_json_as_flat_strings_for_windows_powershell()
     """Prevent 2 subnet IDs being wrapped as a single JSON-array pipeline object."""
     launch = (ROOT / "scripts/aws/run_phase6_dbt.ps1").read_text()
     assert "ConvertFrom-Json -InputObject (($SubnetsJson | Out-String).Trim())" in launch
-    assert "[string[]]$Subnets = $SubnetValues" in launch
-    assert "$SubnetValues -isnot [System.Array]" in launch
+    assert "[string[]]$Subnets = @($ParsedSubnets | ForEach-Object { [string]$_ })" in launch
+    assert "$ParsedSubnets -isnot [System.Array]" in launch
     assert "$Subnets | Select-Object -Unique" in launch
     assert "subnets = $Subnets" in launch
     assert "@($SubnetsJson | ConvertFrom-Json)" not in launch
+
+
+def test_dbt_launcher_has_no_duplicate_body_or_unbalanced_tail():
+    """A former automated replacement duplicated half of the PowerShell file."""
+    launch = (ROOT / "scripts/aws/run_phase6_dbt.ps1").read_text()
+    assert launch.count("$TaskInfoJson = & aws ecs describe-task-definition") == 1
+    assert launch.count("& aws ecs run-task") == 1
+    assert launch.count("finally {") == 1
+    assert launch.count("Push-Location $TerraformDir") == 1
+    assert launch.count("Pop-Location") == 1
+    assert "if ($TaskDef -notmatch" in launch
+    assert "if ($Subnets.Count -ne 2 -or" in launch
+    assert "Where-Object { $_ -notmatch '^subnet-[0-9a-f]{8,}$' }" in launch
+    assert len(launch.splitlines()) < 180
