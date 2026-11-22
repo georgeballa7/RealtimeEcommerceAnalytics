@@ -4,7 +4,7 @@
 
 This is a real **supervised categorical Naive Bayes classifier implemented with SQL**—not Amazon Redshift ML `CREATE MODEL`. The four pre-outcome predictors are order recency, frequency over 90 days, spend over 90 days, and lifetime order count. Bin counts and Laplace-smoothed class likelihoods are persisted in `churn_nb_priors_v1` and `churn_nb_likelihoods_v1`; the `churn_nb_predictions_v1`, `churn_nb_validation_metrics_v1`, and `churn_nb_score_segments_v1` views expose scoring and evaluation.
 
-**Training:** 15,053 customer-month records before September 2026. **Temporal validation:** 7,524 records in September–October 2026. **Current scoring:** 4,382 customers (upstream dbt mart `as_of_date=2026-11-22`).
+**Training:** 15,053 customer-month records before September 2026. **Temporal validation:** 7,524 records in September–October 2026. **Scoring:** Customer population is recalculated from the latest completed dbt mart; it varies with incoming events. The last verified evening baseline had 4,417 scored customers.
 
 Results (temporal holdout): ROC-AUC **0.6398**, accuracy **0.7541**, precision **0.7881**, recall **0.9166**, F1 **0.8475**; majority-class accuracy **0.7455**. Confusion matrix: TP 5141, TN 533, FP 1382, FN 468. This is only a modest uplift over baseline, and **model scores are not calibrated** (in top decile approx. 96.9% score vs 81.8% observed). Treat model as a learning baseline on synthetic data, not as a production decision engine.
 
@@ -22,4 +22,4 @@ WHERE cohort = 'current' ORDER BY churn_probability DESC LIMIT 20;
 
 ## Tableau
 
-The packaged snapshot dashboard is delivered in this chat. For live Tableau use the private Redshift endpoint with Tableau Bridge, VPN, or supported Tableau Cloud Private Connect—not public exposure of Redshift. Connect to database `analytics`, read-only `analytics_ml` and `analytics_marts` views. Avoid publishing customer identifiers to Tableau Public.
+Tableau Desktop connects to the private Redshift workgroup using the SSM access tunnel and read-only role; it can query `analytics_bi`, `analytics_marts`, `analytics_ml` and other granted application schemas. Do not publish customer identifiers to Tableau Public. See `docs/tableau_redshift_connectivity.md`.
