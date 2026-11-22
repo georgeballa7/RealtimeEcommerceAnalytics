@@ -97,14 +97,13 @@ Do not join facts by `customer_key` or `order_date_key` and then aggregate both:
 analytics (Redshift database)
 ├── silver_staging         <- persisted and reconciled Glue Silver (existing)
 ├── analytics_staging      <- dbt views over Silver
-└── analytics_marts        <- dbt tables:
-    ├── dim_date
-    ├── dim_customers
-    ├── dim_products
-    ├── fct_orders
-    ├── fct_order_lines
-    ├── fct_cancellations
-    └── fct_refund_lines
+├── analytics_marts        <- dbt tables:
+│   ├── dim_date, dim_customers, dim_products
+│   ├── fct_orders, fct_order_lines, fct_cancellations, fct_refund_lines
+│   ├── mart_daily_sales
+│   └── mart_customer_churn_training, mart_customer_churn_scoring
+├── analytics_ml           <- SQL churn model and evaluation
+└── analytics_bi           <- Tableau read-only views
 ```
 
 Daily sales and churn feature marts are also materialized by dbt. Inspect current build results and source freshness before trusting any new daily data.
