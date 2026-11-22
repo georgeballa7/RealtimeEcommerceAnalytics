@@ -1,6 +1,6 @@
 # Phase 6 — Redshift dimensional warehouse ERD
 
-This is the *logical star schema* implemented by dbt in Redshift. GitHub renders the Mermaid chart below. Source tables are already populated in `silver_staging`; dbt creates views in `analytics_staging` and physical dimensions/facts in `analytics_marts`. Do not mistake these for an executed dbt build until a runtime has been deployed and verified.
+This is the *logical star schema* implemented by dbt in Redshift. GitHub renders the Mermaid chart below. Source tables are already populated in `silver_staging`; dbt creates views in `analytics_staging` and physical dimensions/facts in `analytics_marts`. The dbt runtime has materialized these models in the last verified successful warehouse run.
 
 ```mermaid
 erDiagram
@@ -82,7 +82,7 @@ erDiagram
 
 | Fact table | Grain | Source | Meaning |
 | --- | --- | --- | --- |
-| `fct_orders` | One source-qualified order | 14,110 historical and 196 latest Shopify orders on the 20-Nov checkpoint | Order count and latest reported order-level value, **not settled cash** |
+| `fct_orders` | One source-qualified order | 14,110 historical synthetic orders plus evolving live Shopify orders | Order count and latest reported order-level value, **not settled cash** |
 | `fct_order_lines` | One source-qualified item line | Synthetic order items and Shopify order lines | Item quantity and merchandise value |
 | `fct_cancellations` | One simulated cancellation event | Historical synthetic cancellation ledger | Simulated cancellation quantity/amount, **not verified refund** |
 | `fct_refund_lines` | One Shopify refund line, when present | Shopify refund + refund-line Silver tables | Recorded refund-line amount; **not payment-settlement evidence** |
@@ -107,9 +107,9 @@ analytics (Redshift database)
     └── fct_refund_lines
 ```
 
-Daily aggregation and churn-feature models already exist but remain separate from the acceptance of the conformed dimensional core. Future Redshift analytics and ML should only start after a clean, runtime-executed `dbt build` and verified source freshness.
+Daily sales and churn feature marts are also materialized by dbt. Inspect current build results and source freshness before trusting any new daily data.
 
-## Controlled deployment sequence
+## Deployment verification sequence
 
 1. Ensure the `silver_staging` loader has committed the current manifest into `warehouse_load_ledger`.
 2. Provision `analytics_staging` and `analytics_marts` schemas with the verified dbt runtime database identity. Confirm that role has read/usage privileges on `silver_staging` and create/write privileges on the two target schemas. Do not grant `PUBLIC` broad permissions.
@@ -117,4 +117,4 @@ Daily aggregation and churn-feature models already exist but remain separate fro
 4. Run `dbt parse` (offline), then a reviewed `dbt build --select +fct_refund_lines +fct_cancellations` to materialize all seven core tables and their dependencies. Check relationships, uniqueness, non-null keys, known historical counts, latest Shopify minimums and ledger integrity.
 5. Only after this succeeds, execute `dbt build` for the aggregation and churn-feature models, followed by a business-metric review. Do not train churn on `current_gbp` at historical as-of times without event-time snapshots.
 
-This file is architecture documentation, **not** an assertion that dbt has already run in Redshift.
+This file describes the logical model, not a guarantee that today's dbt run succeeded.
