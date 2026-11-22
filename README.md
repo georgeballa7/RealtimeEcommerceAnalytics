@@ -5,8 +5,10 @@ AWS-based Shopify order ingestion, operational processing, dimensional analytics
 ## Implemented architecture
 
 ```text
-Shopify → API Gateway → FastAPI Lambda → SQS / DLQ → landing Lambda → S3 + DynamoDB
-              EventBridge → ECS/Fargate generator + lifecycle → private RDS projection
+EventBridge → private ECS generator / lifecycle → Shopify development store
+Shopify webhooks → API Gateway → FastAPI Lambda → SQS / DLQ → landing Lambda
+                                         → S3 event archive + DynamoDB index
+S3 events → private ECS projector → private RDS PostgreSQL
 Private RDS → AWS Glue (PySpark, private VPC connection) → S3 Bronze / Silver
             → Redshift Serverless (silver_staging) → dbt Core (ECS/Fargate)
             → analytics_staging / analytics_marts → analytics_ml / analytics_bi
