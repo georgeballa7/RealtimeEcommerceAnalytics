@@ -1,3 +1,3 @@
 # Training
 
-Logistic-regression baseline and tree-model comparison with chronological splits, reproducible parameters and MLflow tracking. **Not implemented yet.**
+A SQL Naive Bayes classifier is implemented in Redshift (`analytics_ml`). Python logistic-regression/tree-model comparisons and MLflow tracking remain future work. Do not confuse a SQL scoring refresh with training a new Python model.
