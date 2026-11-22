@@ -1,3 +1,3 @@
 # Evaluation
 
-Leakage checks, calibration, precision/recall and PR-AUC, grouped by prediction date where appropriate. Label synthetic data explicitly. **Not implemented yet.**
+SQL Naive Bayes evaluation is implemented in Redshift (`analytics_ml`) with chronological holdout metrics. A separate Python evaluation/MLflow workflow is not implemented. Check leakage, calibration, precision/recall and synthetic-data provenance before applying the results.
