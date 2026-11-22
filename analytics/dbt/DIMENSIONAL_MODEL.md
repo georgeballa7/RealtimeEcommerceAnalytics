@@ -9,7 +9,7 @@ Its templating is Jinja. `source()` declares Silver Redshift dependencies,
 Models are SQL SELECTs materialized as views or tables.
 
 This model consumes **only Glue-validated S3 Silver already loaded to Redshift**
-(not RDS operational tables or raw S3 objects). The 20 November 2026 Glue-to-Redshift export was independently reconciled. The dbt model itself is still only parsed offline; runtime materialization and all data tests remain pending.
+(not RDS operational tables or raw S3 objects). The Glue-to-Redshift source load has been reconciled, and dbt models and tests completed in the last verified evening warehouse run.
 
 ## Redshift schema layout
 
@@ -75,7 +75,7 @@ ID collisions and allow repeatable upserts.
 
 ## Three analytical outputs
 
-1. `mart_daily_sales`: Power BI orders, reported order gross/current totals,
+1. `mart_daily_sales`: Tableau-facing orders, reported order gross/current totals,
    cancellation merchandise separately, date/source/simulation segmentation.
    A simulated cancellation is **not** a verified cash refund; never subtract
    it again from Shopify's latest-current order state to invent net revenue.
@@ -102,7 +102,7 @@ Also use chronological customer-month holdouts, never randomly split rows.
    of the known historical baseline (>=14,110 orders, >=173,905 items,
    >=1,335 cancellations), Shopify composite keys and other data rules.
 5. **Only after `dbt build` passes** should a stable snapshot become visible
-   to Power BI and the churn training job. Tests are not redundant with
+   to Tableau and the churn scoring workflow. Tests are not redundant with
    the Glue per-snapshot reconciliation; dbt tests are warehouse-level.
 6. No physical source row is assumed to exist just because a DDL definition
    or an empty table is present. The test named
@@ -113,13 +113,9 @@ Also use chronological customer-month holdouts, never randomly split rows.
 Shopify ingested -> RDS projector completed -> Glue (RDS full snapshot →
 S3 Bronze → validated S3 Silver) -> verified Silver manifest ->
 transactional Redshift COPY/upsert to `silver_staging` ->
-`dbt build` -> Power BI refresh / churn feature extraction ->
-MLflow scoring and model-version tracking.
+`dbt build` -> curated Redshift BI views -> Tableau live queries and SQL churn scoring.
 
-The source schema has been renamed and the validated Shopify Silver loader successfully loaded both 20 November snapshots. Before any dbt materialization, prepare the separate `analytics_staging` and `analytics_marts` namespaces for the dbt runtime identity and verify its SELECT access to Silver. These are not yet verified as deployed.
-The pending dbt runtime requires a network-accessible private Redshift workgroup
-and short-lived credentials; the example profiles.yml documents required
-connection fields, not a deployed execution environment.
+The source schema has been renamed; the deployed dbt runtime uses a private Redshift connection and the `analytics_staging` and `analytics_marts` namespaces. Continue checking access, test results and data freshness after each ingestion run.
 
 ## Progressive modeling
 
@@ -132,13 +128,13 @@ mix simulated cancellations with actual cash refunds.
 
 ## Reviewed star schema ERD
 
-See [STAR_SCHEMA_ERD.md](STAR_SCHEMA_ERD.md) for the rendered Mermaid entity-relationship diagram, source lineage, seven-table core fact/dimension grains, and the target namespaces. Run `analytics/redshift/prepare_dbt_warehouse_schemas.sql` only with the verified dbt execution role; this step is not yet applied.
+See [STAR_SCHEMA_ERD.md](STAR_SCHEMA_ERD.md) for the rendered Mermaid entity-relationship diagram, source lineage, seven-table core fact/dimension grains, and the target namespaces. Schema bootstrap SQL is retained for reproducibility; review the live deployment before executing any DDL.
 
-## Power BI model relationships
+## BI model relationships
 
 Use single-direction filters from `dim_date`, `dim_customers`, and
 `dim_products` to the relevant fact tables. Avoid activating direct
-fact-to-fact Power BI relationships simultaneously with all dimension paths:
+fact-to-fact Tableau relationships simultaneously with all dimension paths:
 those can introduce ambiguous filter propagation and double-counted measures.
 Direct `order_key` / `line_key` references in the warehouse remain useful
 for dbt integrity tests and drill-through logic. Do not sum order-level and
