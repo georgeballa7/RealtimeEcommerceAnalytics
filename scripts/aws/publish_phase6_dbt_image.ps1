@@ -41,7 +41,7 @@ try {
     $Digest = (& aws ecr list-images --repository-name $Repository --filter tagStatus=TAGGED --query "imageIds[?imageTag=='$Tag'].imageDigest | [0]" --profile $Profile --region $Region --output text | Out-String).Trim()
     Assert-Exit 'Inspect existing ECR image'
     if (-not $Digest -or $Digest -eq 'None') {
-        & docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load --file (Join-Path $Root 'Dockerfile.phase6-dbt') --tag $ImageTag $Root | Out-Host
+        & docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load --file (Join-Path $Root 'docker/Dockerfile.phase6-dbt') --tag $ImageTag $Root | Out-Host
         Assert-Exit 'Build dbt image'
         $DockerConfig = Join-Path ([IO.Path]::GetTempPath()) ("dbt-ecr-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $DockerConfig | Out-Null

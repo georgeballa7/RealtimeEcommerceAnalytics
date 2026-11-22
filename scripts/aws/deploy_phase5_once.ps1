@@ -87,10 +87,10 @@ try {
         Assert-Exit 'Git revision'
         $tag = "phase5-$sha"
         $dockerFiles = @{
-            lambda = 'Dockerfile.phase5-lambda'
-            projector = 'Dockerfile.phase5-projector'
-            generator = 'Dockerfile.phase5-generator'
-            lifecycle = 'Dockerfile.phase5-lifecycle'
+            lambda = 'docker/Dockerfile.phase5-lambda'
+            projector = 'docker/Dockerfile.phase5-projector'
+            generator = 'docker/Dockerfile.phase5-generator'
+            lifecycle = 'docker/Dockerfile.phase5-lifecycle'
         }
         # Reuse the proven Windows ECR workaround from publish_ecr_image.ps1.
         # Docker login fails with HTTP 400 on this machine; push with an isolated

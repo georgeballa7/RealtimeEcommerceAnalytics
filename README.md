@@ -36,8 +36,9 @@ The churn model and transactions are a demonstration, **not** a production decis
 
 | Location | Purpose |
 | --- | --- |
-| `src/ecommerce/`, `apps/` | Domain, application, interfaces, and AWS workloads |
+| `src/ecommerce/` | Domain, application, and interfaces |
 | `scripts/`, `scripts/aws/`, `scripts/glue/` | Ingestion, deployment and orchestration |
+| `docker/` | Container build definitions (root build context) |
 | `infrastructure/terraform/` | Core AWS infrastructure as code |
 | `infrastructure/cloudformation/` | Separately managed infrastructure stacks |
 | `analytics/dbt/`, `analytics/redshift/`, `scripts/redshift/` | Warehouse transformations, SQL and access controls |

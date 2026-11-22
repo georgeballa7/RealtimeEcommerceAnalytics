@@ -6,7 +6,7 @@
   "landing_bucket": "ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6",
   "customer_sync": {
     "repository": "ecommerce-customer-sync-demo",
-    "dockerfile": "Dockerfile.customer-sync",
+    "dockerfile": "docker/Dockerfile.customer-sync",
     "task_family": "ecommerce-customer-sync-demo",
     "container": "customer-sync",
     "log_group": "/ecs/ecommerce-demo/customer-sync",
@@ -21,7 +21,7 @@
   },
   "catalog_sync": {
     "repository": "ecommerce-catalog-sync-demo",
-    "dockerfile": "Dockerfile.catalog-sync",
+    "dockerfile": "docker/Dockerfile.catalog-sync",
     "task_family": "ecommerce-catalog-sync-demo",
     "container": "catalog-sync",
     "log_group": "/ecs/ecommerce-demo/catalog-sync",
@@ -37,7 +37,7 @@
   },
   "phase5_migration": {
     "repository": "ecommerce-phase5-migration-demo",
-    "dockerfile": "Dockerfile.phase5-migration",
+    "dockerfile": "docker/Dockerfile.phase5-migration",
     "task_family": "ecommerce-phase5-migration-demo",
     "container": "phase5-migration",
     "log_group": "/ecs/ecommerce-demo/phase5-migration",
@@ -51,7 +51,7 @@
   },
   "phase5_pricing": {
     "repository": "ecommerce-phase5-pricing-demo",
-    "dockerfile": "Dockerfile.phase5-pricing",
+    "dockerfile": "docker/Dockerfile.phase5-pricing",
     "task_family": "ecommerce-phase5-pricing-demo",
     "container": "phase5-pricing",
     "log_group": "/ecs/ecommerce-demo/phase5-pricing",
@@ -65,7 +65,7 @@
   },
   "phase5_generator": {
     "repository": "ecommerce-phase5-generator-demo",
-    "dockerfile": "Dockerfile.phase5-generator",
+    "dockerfile": "docker/Dockerfile.phase5-generator",
     "task_family": "ecommerce-phase5-generator-demo",
     "container": "phase5-generator",
     "log_group": "/ecs/ecommerce-demo/phase5-generator",
