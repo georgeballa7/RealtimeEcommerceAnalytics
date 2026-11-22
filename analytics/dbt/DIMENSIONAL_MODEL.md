@@ -82,8 +82,8 @@ ID collisions and allow repeatable upserts.
 2. `mart_customer_churn_training`: customer × monthly as-of date, backward
    90-day frequency/spend/recency and **forward 30-day** label. The label is
    only calculated for complete observable horizons.
-3. `mart_customer_churn_scoring`: latest unlabeled customer state used to
-   generate MLflow predictions. Do not train on these current features.
+3. `mart_customer_churn_scoring`: latest unlabeled customer state used by
+   the SQL Naive Bayes scoring baseline. Python/MLflow comparisons are future work; do not train on these current features.
 
 **Churn limitation**: historical `current_gbp` is the *latest* order state;
 using it in past as-of features leaks later refunds/status adjustments.
