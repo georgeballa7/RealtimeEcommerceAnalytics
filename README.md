@@ -41,5 +41,3 @@ python -m pytest -q tests/unit
 ```
 
 Read [Terraform safeguards](infrastructure/terraform/README.md) before changing AWS resources. Historical ingestion entrypoints are documented in [scripts/README.md](scripts/README.md).
-
-**Detailed architecture diagrams, operating schedules, implementation decisions, daily checkpoints and infrastructure reconciliation records are maintained in [Notion](https://app.notion.com/p/41f929a22c1581279669d9dca31d0e2d)** rather than this README.
