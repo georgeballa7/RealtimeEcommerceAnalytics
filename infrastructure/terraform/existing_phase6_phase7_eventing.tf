@@ -71,15 +71,6 @@ resource "aws_iam_role_policy_attachment" "phase6_redshift_loader_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-resource "aws_iam_role_policy" "phase6_coordinator_marker_list" {
-  name = "phase6-coordinator-list-marker-prefixes"
-  role = "ecommerce-phase6-evening-coordinator-role-demo"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{ Effect = "Allow", Action = "s3:ListBucket", Resource = aws_s3_bucket.landing.arn }]
-  })
-}
-
 locals {
   phase7_dbt_event_rules = {
     reconcile = {
