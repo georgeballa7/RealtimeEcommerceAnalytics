@@ -1,3 +1,3 @@
 # Integration tests
 
-Tests with configured Shopify development store, PostgreSQL, Kinesis and Databricks. Must remain opt-in and never run with production credentials by default.
+Integration coverage targets the Shopify development store, AWS Lambda/API Gateway, SQS, S3, DynamoDB, ECS/Fargate, private RDS, Glue and Redshift. Remote tests must remain opt-in; never run against production Shopify or AWS accounts without explicit authorization.
