@@ -28,72 +28,121 @@
               "Version": "2012-10-17",
               "Statement": [
                 {
-                  "Effect": "Allow",
                   "Action": [
                     "dynamodb:GetItem",
                     "dynamodb:UpdateItem",
                     "dynamodb:PutItem",
                     "dynamodb:TransactWriteItems"
                   ],
-                  "Resource": "arn:aws:dynamodb:eu-central-1:825414820081:table/ecommerce-demo-phase5-controller"
+                  "Resource": "arn:aws:dynamodb:eu-central-1:825414820081:table/ecommerce-demo-phase5-controller",
+                  "Effect": "Allow"
                 },
                 {
-                  "Effect": "Allow",
                   "Action": [
                     "dynamodb:Query"
                   ],
-                  "Resource": "arn:aws:dynamodb:eu-central-1:825414820081:table/ecommerce-demo-phase5-controller/index/*"
+                  "Resource": "arn:aws:dynamodb:eu-central-1:825414820081:table/ecommerce-demo-phase5-events/index/by_state",
+                  "Effect": "Allow"
                 },
                 {
-                  "Effect": "Allow",
                   "Action": [
                     "sqs:GetQueueAttributes"
                   ],
-                  "Resource": "arn:aws:sqs:eu-central-1:825414820081:ecommerce-demo-events"
+                  "Resource": "arn:aws:sqs:eu-central-1:825414820081:ecommerce-demo-events",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "ecs:ListTasks"
+                  ],
+                  "Resource": "arn:aws:ecs:eu-central-1:825414820081:cluster/ecommerce-demo",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "rds:DescribeDBInstances"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "rds:StartDBInstance"
+                  ],
+                  "Resource": "arn:aws:rds:eu-central-1:825414820081:db:ecommerce-postgres-dev",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "glue:StartJobRun",
+                    "glue:GetJobRun",
+                    "glue:GetJobRuns"
+                  ],
+                  "Resource": "arn:aws:glue:eu-central-1:825414820081:job/ecommerce-phase6-shopify-silver-demo",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": "arn:aws:s3:::ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6/warehouse/shopify_snapshots/v1/*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": "arn:aws:lambda:eu-central-1:825414820081:function:ecommerce-phase6-silver-redshift-loader-demo",
+                  "Effect": "Allow"
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "read-phase5-combined-slot-commit-marker",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": "arn:aws:s3:::ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6/simulation/phase5/slots/v1/*"
                 },
                 {
                   "Effect": "Allow",
                   "Action": [
                     "ecs:ListTasks"
                   ],
-                  "Resource": "arn:aws:ecs:eu-central-1:825414820081:cluster/ecommerce-demo"
-                },
+                  "Resource": "arn:aws:ecs:eu-central-1:825414820081:container-instance/ecommerce-demo/*",
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": "arn:aws:ecs:eu-central-1:825414820081:cluster/ecommerce-demo"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "phase6-coordinator-list-marker-prefixes",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
                 {
+                  "Sid": "ListOnlyCoordinatorMarkerPrefixes",
                   "Effect": "Allow",
-                  "Action": [
-                    "rds:DescribeDBInstances"
-                  ],
-                  "Resource": "*"
-                },
-                {
-                  "Effect": "Allow",
-                  "Action": [
-                    "rds:StartDBInstance"
-                  ],
-                  "Resource": "arn:aws:rds:eu-central-1:825414820081:db:ecommerce-postgres-dev"
-                },
-                {
-                  "Effect": "Allow",
-                  "Action": [
-                    "glue:StartJobRun",
-                    "glue:GetJobRun",
-                    "glue:GetJobRuns"
-                  ],
-                  "Resource": "arn:aws:glue:eu-central-1:825414820081:job/ecommerce-phase6-shopify-silver-demo"
-                },
-                {
-                  "Effect": "Allow",
-                  "Action": [
-                    "s3:GetObject"
-                  ],
-                  "Resource": "arn:aws:s3:::ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6/warehouse/shopify_snapshots/v1/*"
-                },
-                {
-                  "Effect": "Allow",
-                  "Action": [
-                    "lambda:InvokeFunction"
-                  ],
-                  "Resource": "arn:aws:lambda:eu-central-1:825414820081:function:ecommerce-phase6-silver-redshift-loader-demo"
+                  "Action": "s3:ListBucket",
+                  "Resource": "arn:aws:s3:::ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6",
+                  "Condition": {
+                    "StringLike": {
+                      "s3:prefix": [
+                        "simulation/phase5/slots/v1/*",
+                        "warehouse/shopify_snapshots/v1/*"
+                      ]
+                    }
+                  }
                 }
               ]
             }
