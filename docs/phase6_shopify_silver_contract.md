@@ -1,6 +1,6 @@
 # Phase 6 — Live Shopify Bronze-to-Silver contract and Redshift staging reconciliation
 
-Status: feature-branch implementation; Glue job and automatic trigger NOT yet deployed.
+Status: Glue processing, automated coordinator and Redshift loading are deployed; the latest daily run still requires separate verification.
 
 ## Processing boundary
 
@@ -16,9 +16,7 @@ This is a **policy port**, not an import of the Pandas implementation.
 ## Validated source-to-target column compatibility
 
 The column ordering and major Redshift types below follow
-analytics/redshift/silver_staging_schema.sql, which defines these existing
-unpopulated Shopify tables (currently still under raw in AWS until the
-separate guarded schema rename is explicitly approved and applied).
+analytics/redshift/silver_staging_schema.sql, which defines the Shopify landing tables in the live `silver_staging` schema.
 
 | Spark Silver table | Redshift silver_staging target | Columns | Matching data types |
 | --- | --- | ---: | --- |
@@ -62,22 +60,19 @@ the catalog and identity-sync evidence before unifying the star-schema facts.
   introduce an explicit source snapshot / coordinated CDC boundary before
   enabling concurrent production-scale extraction.
 - Use one JDBC reader per table initially to avoid saturating the small RDS.
-- Never run the job when RDS is stopping/restarting. The Phase 5 controller\n  must hold an explicit RDS-in-use lease for the entire Glue job; its current\n  idle shutdown logic has not yet been updated to recognize Glue execution.\n- Confirm the source table set and all five types from the actual PostgreSQL\n  catalog, and keep a stable no-writes boundary across the full extract.
-- No automatic triggers until an end-to-end manual run is verified.
-- All Glue AWS resources are Terraform opt-in; enable only after an inspected
-  plan preserves the existing Phase 5 generator, controller and schedules.
+- Never run the job while RDS is stopping or restarting; verify the controller's Glue-aware lease spans the full extraction.
+- Confirm source types against the actual PostgreSQL catalog and preserve a stable extraction boundary.
+- The coordinator starts processing only after the committed slot marker and event-settlement checks.
+- Terraform changes must preserve the existing generator, controller, and schedules.
 - The old Python exporter is superseded for new runs; do not start its ECS task.
-- The legacy Redshift loader's direct unvalidated live-manifest option remains
-  blocked until it is replaced by a reviewed Silver manifest loader.
-- Migrating the Redshift schema is an independent database operation:
-  `ALTER SCHEMA "raw" RENAME TO silver_staging;`, only after preview.
+- Load only validated Silver manifests, with atomic reconciliation and idempotent warehouse operations.
+- The `raw` → `silver_staging` schema rename is already complete; do not repeat it.
 
-## Open pre-production checks
+## Continuing acceptance checks
 
 1. Validate the Spark script with local unit fixtures and AWS Glue syntax/permissions.
 2. Confirm RDS source-column types against the actual PostgreSQL catalog.
 3. Confirm source money precision, text lengths and accepted identity status values.
-4. Run a manual Glue job after projector success, inspect quarantine and row counts.
-5. Implement and test Silver-manifest-to-Redshift transactional COPY and dbt tests.
-6. Connect an ingestion-completion signal to the on-demand Glue job, with
-   idempotent run identifiers, back-pressure and AWS budget monitoring.
+4. Confirm current Glue success and source/accepted/quarantine counts.
+5. Verify the corresponding Redshift ledger and successful dbt build/tests.
+6. Check idempotent slot markers, retry safety, and NAT resource release.
