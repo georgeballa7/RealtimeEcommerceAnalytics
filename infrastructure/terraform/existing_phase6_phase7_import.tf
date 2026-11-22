@@ -27,10 +27,6 @@ import {
   id = "ecommerce-phase6-redshift-loader-demo/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 import {
-  to = aws_iam_role_policy.phase6_coordinator_marker_list
-  id = "ecommerce-phase6-evening-coordinator-role-demo:phase6-coordinator-list-marker-prefixes"
-}
-import {
   to = aws_cloudwatch_event_rule.phase7_dbt["reconcile"]
   id = "ecommerce-phase7-dbt-reconcile-demo"
 }
