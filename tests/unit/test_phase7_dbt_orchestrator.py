@@ -89,11 +89,11 @@ def test_future_nat_controller_tracks_warehouse_dbt_marker():
     assert 'f"phase7-dbt:{dbt_slot}:{batch}"' in nat
 
 
-def test_deployment_uses_real_event_targets_but_disabled_launch():
+def test_deployment_verifies_enabled_guarded_dbt_launch():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     deploy = (root / "scripts/aws/deploy_phase7_dbt_orchestrator.ps1").read_text()
-    assert "DBT_LAUNCH_ENABLED = 'false'" in deploy
+    assert "DBT_LAUNCH_ENABLED -ne 'true'" in deploy
     assert 'ConvertTo-Json -InputObject @(' in deploy
     assert "put-targets" in deploy
-    assert "enable-rule" in deploy
+    assert "enable-rule" in deploy\n    assert "pinned image, networking and DynamoDB lock" in deploy
