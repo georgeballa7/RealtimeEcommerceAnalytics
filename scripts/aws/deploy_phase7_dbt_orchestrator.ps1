@@ -3,7 +3,7 @@ Read-only verification of the Phase 7 event-driven dbt orchestrator.
 It was deployed into AWS CloudFormation stack
 ecommerce-phase7-dbt-orchestrator-demo; never create a second unmanaged Lambda.
 Use the connected AWS stack for subsequent source revisions and controlled
-activation only after the new dbt image, ECS AuthCheck and SQL grants succeed.
+activation is now enabled after the verified dbt image, ECS AuthCheck and SQL grants.
 #>
 [CmdletBinding()]
 param([switch]$Apply)
@@ -40,7 +40,7 @@ try {
     Check 'Lambda configuration'
     $Cfg = $CfgJson | Out-String | ConvertFrom-Json
     if ($Cfg.State -ne 'Active' -or $Cfg.Handler -ne 'index.handler' -or
-        $Cfg.Environment.Variables.DBT_LAUNCH_ENABLED -ne 'false') {
+        $Cfg.Environment.Variables.DBT_LAUNCH_ENABLED -ne 'true') {
         throw 'Unexpected orchestrator Lambda code, state or launch flag'
     }
     foreach ($Rule in $Rules) {
@@ -60,6 +60,6 @@ try {
         throw 'Loader OnSuccess destination differs'
     }
     Write-Host 'VERIFIED: CloudFormation dbt orchestrator, three EventBridge rule targets, loader-success destination, recovery schedule.'
-    Write-Host 'DBT LAUNCH IS DISABLED until the fixed image, AuthCheck and SQL grants pass.'
+    Write-Host 'DBT LAUNCH IS ENABLED: task launch remains guarded by verified warehouse completion, pinned image, networking and DynamoDB lock.'
 }
 finally { Pop-Location }
