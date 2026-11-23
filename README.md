@@ -48,7 +48,7 @@ The churn model and transactions are a demonstration, **not** a production decis
 
 ```powershell
 python -m pip install -e ".[dev,historical,aws]"
-ruff check src apps tests
+ruff check src tests
 python -m pytest -q tests/unit
 ```
 
