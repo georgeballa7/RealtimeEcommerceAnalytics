@@ -20,7 +20,7 @@ A NAT Gateway incurs charges while provisioned; the *reserved public IPv4 addres
 
 - Private RDS PostgreSQL, **on-demand** ECS/Fargate tasks and their active ECR repositories, SQS/DLQ, DynamoDB, S3 landing and replay data, CloudWatch and the Phase 5 API Gateway/Lambda pipeline. Legacy ALB + always-on ECS API, consumer service, and Spark demo definitions were retired from this branch; live removal requires a separately reviewed Terraform plan.
 - Glue Silver processing and Redshift Serverless warehouse, with a pinned dbt ECS task definition.
-- Phase 6 coordinator/loader, Phase 7 dbt orchestration and Tableau SSM access are deployed as **existing CloudFormation stacks**. Guarded Terraform import declarations are staged in `existing_stacks_import.tf`; do not apply them without reviewing the complete live-state plan. Their CloudFormation templates remain version-controlled.
+- Phase 6 coordinator/loader, Phase 7 dbt orchestration and Tableau SSM access are deployed as **existing CloudFormation stacks**. CloudFormation owns the four project stacks and their children; stack imports were removed from Terraform to preserve a single control-plane owner. Their CloudFormation templates remain version-controlled. Separate Phase 6/7 eventing and IAM imports remain staged and require review before any Terraform apply.
 - The RDS instance can be stopped operationally. Its temporary stopped state is not a desired Terraform resource deletion.
 
 ## Planning and operational safeguards
