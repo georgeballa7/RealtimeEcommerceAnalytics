@@ -94,7 +94,8 @@ def test_deployment_verifies_enabled_guarded_dbt_launch():
     root = Path(__file__).resolve().parents[2]
     deploy = (root / "scripts/aws/deploy_phase7_dbt_orchestrator.ps1").read_text()
     assert "DBT_LAUNCH_ENABLED -ne 'true'" in deploy
-    assert 'ConvertTo-Json -InputObject @(' in deploy
-    assert "put-targets" in deploy
-    assert "enable-rule" in deploy
+    assert "Refusing a second direct Lambda deployment" in deploy
+    assert "list-targets-by-rule" in deploy
+    assert "describe-rule" in deploy
+    assert "get-function-configuration" in deploy
     assert "pinned image, networking and DynamoDB lock" in deploy
