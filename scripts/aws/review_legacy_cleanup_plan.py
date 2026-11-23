@@ -65,14 +65,14 @@ def review(plan: dict) -> list[str]:
         if not isinstance(address, str) or address in seen:
             raise UnsafeCleanupPlan("Missing or duplicate plan address")
         seen.add(address)
+        # Imports are not allowed even if Terraform represents them as no-op.
+        if row.get("importing") or row.get("change", {}).get("importing"):
+            raise UnsafeCleanupPlan("Unexpected import of " + address)
         if actions == ["no-op"]:
             continue
         if row.get("mode") == "data" and actions == ["read"]:
             continue
-        # Imports, creates, replacements, updates, and deferred actions are
-        # not part of this isolated retirement operation.
-        if row.get("importing") or row.get("change", {}).get("importing"):
-            raise UnsafeCleanupPlan("Unexpected import of " + address)
+        # Creates, replacements, updates, and deferred actions are prohibited.
         if address not in RETIRED or actions != ["delete"]:
             raise UnsafeCleanupPlan(f"UNSAFE: {address} proposes {actions!r}")
         selected.append(address)
