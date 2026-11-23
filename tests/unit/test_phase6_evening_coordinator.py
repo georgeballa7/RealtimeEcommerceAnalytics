@@ -73,7 +73,7 @@ def test_slot_windows_cover_both_berlin_runs_and_summer_time():
     assert mod.processing_day(datetime(2026, 11, 21, 1, 0, tzinfo=berlin), "afternoon") == "2026-11-20"
     assert mod.slot_for_time(summer) == "morning"
     assert mod.slot_for_time(datetime(2026, 11, 20, 7, 55, tzinfo=berlin)) is None
-    assert mod.slot_for_time(datetime(2026, 11, 20, 21, 55, tzinfo=berlin)) is None
+    assert mod.slot_for_time(datetime(2026, 11, 20, 21, 55, tzinfo=berlin)) == "afternoon"
     assert mod.SLOT_IDS["afternoon"] == "phase6-evening"  # existing ledger retained
     assert mod.SLOT_IDS["morning"] != mod.SLOT_IDS["afternoon"]
 
