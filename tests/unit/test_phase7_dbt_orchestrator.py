@@ -96,4 +96,5 @@ def test_deployment_verifies_enabled_guarded_dbt_launch():
     assert "DBT_LAUNCH_ENABLED -ne 'true'" in deploy
     assert 'ConvertTo-Json -InputObject @(' in deploy
     assert "put-targets" in deploy
-    assert "enable-rule" in deploy\n    assert "pinned image, networking and DynamoDB lock" in deploy
+    assert "enable-rule" in deploy
+    assert "pinned image, networking and DynamoDB lock" in deploy
