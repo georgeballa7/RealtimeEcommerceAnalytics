@@ -13,11 +13,8 @@ stage_nat_lifecycle = false
 db_instance_class     = "db.t4g.micro"
 db_allocated_storage  = 20
 
-# Application workload deployment is disabled until functional images and TLS are ready.
-# api_image           = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-api-demo@sha256:..."
-# acm_certificate_arn = "arn:aws:acm:eu-central-1:ACCOUNT:certificate/..."
-# consumer_image      = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-consumer-demo@sha256:..."
-# spark_image         = "ACCOUNT.dkr.ecr.eu-central-1.amazonaws.com/ecommerce-spark-demo@sha256:..."
+# Legacy ALB/ECS API, ECS consumer and Spark demo configuration retired.
+# Current ingress is API Gateway + Lambda, followed by SQS and on-demand ECS tasks.
 
 # Existing deployment also has opt-in Redshift/Glue/dbt modules and pinned images.
 # DO NOT apply with this example alone: reconstruct actual opt-in flags and pinned
