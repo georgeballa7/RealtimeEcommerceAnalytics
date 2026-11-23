@@ -36,15 +36,16 @@ def test_nat_prewarm_windows(month, day, hour, minute, expected):
     assert mod.slot_window(local) == expected
 
 
-def test_nat_is_retained_for_22_00_lifecycle_ecs_task():
+def test_nat_earliest_release_tracks_1630_lifecycle_not_old_2200():
     at = lambda h, m: datetime(2026, 11, 21, h, m, tzinfo=BERLIN)
     assert not mod.can_consider_release(at(7, 55), "morning")
     assert mod.can_consider_release(at(8, 30), "morning")
-    assert not mod.can_consider_release(at(17, 59), "afternoon")
-    assert not mod.can_consider_release(at(18, 20), "afternoon")
-    assert not mod.can_consider_release(at(18, 25), "afternoon")
-    assert not mod.can_consider_release(at(22, 20), "afternoon")
+    assert not mod.can_consider_release(at(16, 29), "afternoon")
+    assert mod.can_consider_release(at(16, 30), "afternoon")
+    assert mod.can_consider_release(at(18, 20), "afternoon")
     assert mod.can_consider_release(at(22, 25), "afternoon")
+    # This only sets the earliest release time: live queue, ECS, Glue, dbt,
+    # lifecycle completion and quiet-period guards must independently pass.
     assert mod.is_stale(at(14, 0), "morning")
     assert not mod.is_stale(at(23, 0), "afternoon")
     assert mod.is_stale(at(3, 0), "afternoon")
@@ -133,8 +134,8 @@ def test_terraform_keeps_static_nat_by_default_and_dynamic_opt_in_isolated():
         (8, 9, True), (8, 10, False),
         (15, 49, False), (15, 50, True), (16, 5, True),
         (16, 10, False),
-        (21, 49, False), (21, 50, True), (22, 9, True),
-        (22, 10, False),
+        (16, 19, False), (16, 20, True), (16, 39, True),
+        (16, 40, False), (21, 50, False), (22, 9, False),
     ],
 )
 def test_outbound_readiness_windows(hour, minute, expected):
@@ -176,12 +177,13 @@ def test_morning_and_afternoon_use_distinct_daily_nat_records():
     assert mod.slot_key(day, "morning") == "phase6-nat:2026-11-21:morning"
 
 
-def test_nat_release_window_preserves_night_even_after_18_00(monkeypatch):
-    at = datetime(2026, 11, 21, 18, 35, tzinfo=BERLIN)
-    monkeypatch.setenv("PHASE5_LEGACY_LIFECYCLE_ENABLED", "false")
-    assert not mod.can_consider_release(at, "afternoon")
-    at = datetime(2026, 11, 22, 1, 10, tzinfo=BERLIN)
-    assert mod.can_consider_release(at, "afternoon")
+def test_nat_release_window_allows_early_safe_release_and_overnight_recovery():
+    before = datetime(2026, 11, 21, 16, 25, tzinfo=BERLIN)
+    after = datetime(2026, 11, 21, 18, 35, tzinfo=BERLIN)
+    overnight = datetime(2026, 11, 22, 1, 10, tzinfo=BERLIN)
+    assert not mod.can_consider_release(before, "afternoon")
+    assert mod.can_consider_release(after, "afternoon")
+    assert mod.can_consider_release(overnight, "afternoon")
 
 def test_terraform_legacy_schedule_defaults_to_preserved_until_verified():
     script = (ROOT / "infrastructure/terraform/phase5_scheduled_lifecycle.tf").read_text()
