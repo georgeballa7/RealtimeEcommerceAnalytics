@@ -9,7 +9,7 @@ output "database_subnet_ids" {
 }
 
 output "rds_security_group_id" {
-  description = "Database security group; permits ECS task security group on port 5432."
+  description = "Database security group; allows approved Glue and other explicit task security groups on port 5432."
   value       = aws_security_group.rds.id
 }
 
