@@ -237,6 +237,7 @@ def test_state_helpers_work_from_terraform_directory_as_native_cli(tmp_path):
             "--account", "825414820081",
         ],
         cwd=root / "infrastructure" / "terraform",
+        check=False,
         capture_output=True,
         text=True,
         timeout=30,
