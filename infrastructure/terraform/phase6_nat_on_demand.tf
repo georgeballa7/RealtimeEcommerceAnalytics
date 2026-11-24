@@ -5,8 +5,10 @@
 data "archive_file" "phase6_nat_lifecycle" {
   count       = local.nat_lifecycle_count
   type        = "zip"
-  source_file = "${path.module}/../../scripts/aws/phase6_nat_lifecycle_lambda.py"
-  output_path = "${path.module}/.terraform/phase6_nat_lifecycle.zip"
+  # Canonicalize Windows CRLF before archiving so the ZIP is platform-stable.
+  source_content          = replace(file("${path.module}/../../scripts/aws/phase6_nat_lifecycle_lambda.py"), "\r\n", "\n")
+  source_content_filename = "phase6_nat_lifecycle_lambda.py"
+  output_path             = "${path.module}/.terraform/phase6_nat_lifecycle.zip"
 }
 
 resource "aws_cloudwatch_log_group" "phase6_nat_lifecycle" {
