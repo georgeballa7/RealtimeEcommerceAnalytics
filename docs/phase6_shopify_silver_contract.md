@@ -4,7 +4,7 @@ Status: Glue processing, automated coordinator and Redshift loading are deployed
 
 ## Processing boundary
 
-Phase 5 Shopify -> webhook inbox / RDS projector -> confirmed RDS ingestion boundary
+Phase 5 Shopify -> SQS-backed webhook ingress -> S3 landing -> ECS projector -> confirmed RDS ingestion boundary
 -> Glue PySpark JDBC extraction -> versioned S3 Bronze Parquet
 -> Glue DQ / identity checks / quarantine -> S3 Silver JSONL.gz plus manifest
 -> Redshift silver_staging (only committed Silver manifests) -> dbt staging/marts.

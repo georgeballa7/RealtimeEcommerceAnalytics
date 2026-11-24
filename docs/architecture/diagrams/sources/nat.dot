@@ -1,0 +1,18 @@
+digraph G {
+graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.34, ranksep=0.48, fontname="Helvetica", fontsize=19, labelloc=t, label="On-demand network lifecycle"];
+node [shape=box,style="rounded,filled",color="#ccd7e0",fillcolor="white",fontname="Helvetica",margin="0.12,0.09"];
+edge [color="#335772",fontcolor="#28465b",fontname="Helvetica",fontsize=11,arrowsize=0.7];
+subgraph cluster_aws { label="AWS Region · Europe (Frankfurt)"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+timer [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/EventBridge.png"/></TD><TD ALIGN="LEFT"><B>EventBridge Scheduler</B><BR/><FONT POINT-SIZE="10">Five-minute tick</FONT></TD></TR></TABLE>>];
+ctrl [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Lambda.png"/></TD><TD ALIGN="LEFT"><B>NAT lifecycle controller</B><BR/><FONT POINT-SIZE="10">Select slot and acquire lease</FONT></TD></TR></TABLE>>];
+lock [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/DynamoDB.png"/></TD><TD ALIGN="LEFT"><B>DynamoDB</B><BR/><FONT POINT-SIZE="10">Slot, lock and completion state</FONT></TD></TR></TABLE>>];
+nat [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/VPCNATGateway.png"/></TD><TD ALIGN="LEFT"><B>Public NAT gateway</B><BR/><FONT POINT-SIZE="10">Create or delete with reserved EIP</FONT></TD></TR></TABLE>>];
+route [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD ALIGN="LEFT"><B>Application route tables</B><BR/><FONT POINT-SIZE="10">Two private subnet default routes</FONT></TD></TR></TABLE>>];
+guards [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD ALIGN="LEFT"><B>Workload observations</B><BR/><FONT POINT-SIZE="10">ECS, SQS, Glue and projector activity</FONT></TD></TR></TABLE>>];
+}
+timer -> ctrl [label="invoke",style=dashed];
+ctrl -> lock [label="conditional state updates",style=dashed];
+ctrl -> nat [label="prewarm / guarded release",style=dashed];
+ctrl -> route [label="install / remove owned routes",style=dashed];
+guards -> ctrl [label="idle and readiness checks",style=dashed];
+}

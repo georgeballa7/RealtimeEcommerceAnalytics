@@ -1,0 +1,67 @@
+# Operating the Frankfurt deployment
+
+## Verify a slot with read-only access
+
+Identify the Europe/Berlin processing date and slot. The generator uses morning/afternoon, while a downstream dbt marker uses morning/evening. Carry the batch ID through the following checks. Resource names are available in the configured deployment and CloudFormation outputs.
+
+| Checkpoint | Evidence to inspect | What success establishes |
+| --- | --- | --- |
+| Generator and lifecycle | Generation marker for the slot. For the afternoon, both generation markers and the day's settled lifecycle marker. | Scheduled Shopify work reached its application completion boundary. |
+| Landing and projection | Queue age, visible/in-flight counts, DLQ, pending event index, projector log and RDS event ledger. | Landed events were applied. An empty queue alone does not cover pending S3 objects. |
+| Glue | Coordinator day/batch, Glue run status, Bronze/Silver manifests, source/accepted/quarantine counts. | The expected batch passed publication checks. |
+| Redshift | Matching manifest key and digest in the load ledger, warehouse acknowledgement and verified table counts. | A committed snapshot reached staging. |
+| dbt and Tableau | DynamoDB batch marker, ECS task exit code, dbt tests, then the workbook's reporting date and source filters. | Distinguishes a failed build from a stale extract or filtered dashboard. |
+| End of slot | NAT release log, gateway state and both route tables. Check RDS, access host and active ECS/Glue workloads separately. | Verifies resource release independently of data freshness. |
+
+The following AWS CLI examples read status. Set the AWS profile for the project and the indicated variables to actual deployed resource names in the current shell.
+
+```sh
+aws scheduler list-schedules --region eu-central-1 --query 'Schedules[].[Name,State]'
+aws glue get-job-runs --region eu-central-1 --job-name "$GLUE_JOB_NAME" --max-results 3 --query 'JobRuns[].[Id,JobRunState,StartedOn]'
+aws ecs describe-tasks --region eu-central-1 --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN" --query 'tasks[].[lastStatus,stopCode,containers[].exitCode]'
+aws ec2 describe-route-tables --region eu-central-1 --route-table-ids "$APP_ROUTE_A" "$APP_ROUTE_B" --query 'RouteTables[].Routes'
+aws cloudwatch describe-alarms --region eu-central-1 --alarm-name-prefix ecommerce-demo --query 'MetricAlarms[].[AlarmName,StateValue]'
+```
+
+In an authorized read-only warehouse session, inspect load identity and the source split for the day under review. Querying Redshift can consume compute.
+
+```sql
+SELECT manifest_key, manifest_sha256
+FROM silver_staging.warehouse_load_ledger
+ORDER BY loaded_at DESC LIMIT 10;
+
+SELECT order_date, source_system, is_synthetic, orders, gross_gbp, current_gbp
+FROM analytics_marts.mart_daily_sales
+ORDER BY order_date DESC, source_system LIMIT 20;
+```
+
+## Deployment and changes
+
+The [bootstrap module](../../infrastructure/bootstrap) defines the versioned S3 state backend. The [main Terraform module](../../infrastructure/terraform/README.md) uses native state locking and deployment-specific feature flags and image digests. Backend configuration, plans, complete deployment variables and secrets belong outside version control. Use Secrets Manager references and task/Lambda execution roles. The Shopify signing secret verifies webhooks. The Shopify access token authorizes API operations.
+
+Container Dockerfiles under [docker](../../docker) use the repository root as build context. The project builds role-specific images, pushes them to ECR and registers task definitions. The orchestrator validates the pinned dbt image digest before launch. A changed tag or a successful build alone cannot establish the deployed revision. Reconstruct effective settings from protected state before planning an update to an existing deployment. Review the saved plan for changes to active services and staged imports. The four [CloudFormation templates](../../infrastructure/cloudformation) have a separate deployment lifecycle.
+
+[GitHub Actions](../../.github/workflows) runs Python lint, compilation and unit tests. Path-filtered checks cover PowerShell tooling, Glue contracts/Spark, Terraform offline validation and dbt parse. Passing CI establishes source-level checks. It does not deploy a stack or verify a processing slot.
+
+**State-changing operations.** Publishing an image, registering a task, applying a saved plan, updating a stack, refitting the churn SQL model, replaying events and starting the Tableau tunnel can change remote state or incur compute charges. The Tableau helper can start the access EC2 instance. Use the [Tableau guide](../tableau_redshift_connectivity.md) to close the session when finished. Migrations and Shopify identity backfills have their own ledgers and are separate from routine reporting.
+
+## Failure diagnosis
+
+| Symptom | First evidence | Recovery boundary |
+| --- | --- | --- |
+| Shopify receives 401, 403 or 503 | API logs, expected shop, signing-secret reference, SQS permissions and availability | Correct the cause and reconcile delivery identity. A 503 can be retried by the sender. |
+| Queue drained, orders missing | DynamoDB pending index, controller error hold, RDS status, ECS stopped reason, object checksum | Resume the recorded event after identifying the failed boundary. Preserve the same shop and webhook ID. |
+| Coordinator waiting | Exact marker payload, last projected event time, queue/in-flight and pending counts, worker and lease | Let the next reconciliation tick evaluate genuine completion. A fabricated marker can publish an incomplete snapshot. |
+| Glue or loader fails | Glue run ID, quarantine, Silver manifest digest, loader logs and prior warehouse ledger | Resolve source/identity or COPY failure. Check the ledger before retry. A conflicting checksum requires investigation. |
+| dbt launch uncertain | Batch marker, global lock, task ARN, task family, image digest and route readiness | Match the ECS task and its exit status before clearing any lock or launching again. |
+| NAT still present | Controller reason, both slot records, recent activity, pending/running tasks, Glue runs and dbt state | A retained gateway can protect active work. Fix the blocking condition and observe the next controller tick. |
+
+CloudWatch alarms cover DLQ messages, oldest queue age, RDS CPU and NAT controller errors. Check alarm actions and subscribed destinations in the deployment when diagnosing missing alerts. Treat queue metrics as approximate.
+
+## Availability and cost controls
+
+The NAT controller ticks every five minutes. Prewarming begins at 07:30 and 15:30. Normal release consideration starts at 08:30 or 16:30. Slot and warehouse/dbt evidence, a 20-minute activity quiet period and independent workload checks can extend these windows. A stale idle slot has an explicit release path. Release after staleness is not proof of successful data processing. The controller removes its application default routes before requesting gateway deletion and keeps the reserved Elastic IP. The S3 endpoint routes persist.
+
+RDS startup latency is absorbed by the controller and pending index. The Glue lease protects JDBC extraction from competing stop decisions. On-demand tasks terminate after work. Redshift compute, persistent storage, snapshots, reserved public IPv4, CloudWatch retention and data transfer have separate cost drivers. A stopped database or deleted gateway alone cannot establish a zero-cost account.
+
+For controlled shutdown, first stop future writers and schedules in a reviewed change, allow in-flight work to settle, then verify the last slot, ledger, dbt result and retained archives. Export required marts, model parameters, manifests and recovery evidence before retiring storage. Preserve the backend and its recovery path while reviewing Terraform plans and CloudFormation changes separately. Verify queue/DLQ contents, leases, active tasks, Glue jobs, NAT/routes and access sessions before teardown. Check subsequent billing and retained snapshots or addresses against the intended end state.

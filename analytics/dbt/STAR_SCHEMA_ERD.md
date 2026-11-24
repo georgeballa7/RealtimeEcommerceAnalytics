@@ -11,13 +11,13 @@ erDiagram
     DIM_CUSTOMERS ||--o{ FCT_ORDERS : "customer_key"
     DIM_CUSTOMERS ||--o{ FCT_ORDER_LINES : "customer_key"
     DIM_CUSTOMERS ||--o{ FCT_CANCELLATIONS : "customer_key"
-    DIM_CUSTOMERS ||--o{ FCT_REFUND_LINES : "customer_key"
+    DIM_CUSTOMERS |o--o{ FCT_REFUND_LINES : "customer_key"
     DIM_PRODUCTS ||--o{ FCT_ORDER_LINES : "variant_key"
     DIM_PRODUCTS ||--o{ FCT_CANCELLATIONS : "variant_key"
-    DIM_PRODUCTS ||--o{ FCT_REFUND_LINES : "optional variant_key"
+    DIM_PRODUCTS |o--o{ FCT_REFUND_LINES : "optional variant_key"
     FCT_ORDERS ||--o{ FCT_ORDER_LINES : "order_key - logical drill-through"
     FCT_ORDERS ||--o{ FCT_CANCELLATIONS : "order_key - logical drill-through"
-    FCT_ORDERS ||--o{ FCT_REFUND_LINES : "order_key - logical drill-through"
+    FCT_ORDERS |o--o{ FCT_REFUND_LINES : "order_key - logical drill-through"
 
     DIM_DATE {
         date date_key PK

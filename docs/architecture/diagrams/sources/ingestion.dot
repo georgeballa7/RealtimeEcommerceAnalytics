@@ -1,0 +1,30 @@
+digraph G {
+graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.34, ranksep=0.48, fontname="Helvetica", fontsize=19, labelloc=t, label="Webhook delivery and operational projection"];
+node [shape=box,style="rounded,filled",color="#ccd7e0",fillcolor="white",fontname="Helvetica",margin="0.12,0.09"];
+edge [color="#335772",fontcolor="#28465b",fontname="Helvetica",fontsize=11,arrowsize=0.7];
+hook [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD ALIGN="LEFT"><B>Shopify</B><BR/><FONT POINT-SIZE="10">Development store</FONT></TD></TR></TABLE>>];
+subgraph cluster_aws { label="AWS Region · Europe (Frankfurt)"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+api [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/APIGateway.png"/></TD><TD ALIGN="LEFT"><B>API Gateway</B><BR/><FONT POINT-SIZE="10">Webhook endpoint</FONT></TD></TR></TABLE>>];
+verify [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Lambda.png"/></TD><TD ALIGN="LEFT"><B>FastAPI on Lambda</B><BR/><FONT POINT-SIZE="10">Verify signature and envelope</FONT></TD></TR></TABLE>>];
+q [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/SimpleQueueService.png"/></TD><TD ALIGN="LEFT"><B>Amazon SQS</B><BR/><FONT POINT-SIZE="10">Buffer verified deliveries</FONT></TD></TR></TABLE>>];
+land [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Lambda.png"/></TD><TD ALIGN="LEFT"><B>Landing Lambda</B><BR/><FONT POINT-SIZE="10">Process queue records</FONT></TD></TR></TABLE>>];
+obj [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/SimpleStorageService.png"/></TD><TD ALIGN="LEFT"><B>Amazon S3</B><BR/><FONT POINT-SIZE="10">Raw event object</FONT></TD></TR></TABLE>>];
+idx [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/DynamoDB.png"/></TD><TD ALIGN="LEFT"><B>DynamoDB</B><BR/><FONT POINT-SIZE="10">Pending event index</FONT></TD></TR></TABLE>>];
+ctl [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Lambda.png"/></TD><TD ALIGN="LEFT"><B>RDS controller</B><BR/><FONT POINT-SIZE="10">Readiness and task coordination</FONT></TD></TR></TABLE>>];
+worker [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/ElasticContainerService.png"/></TD><TD ALIGN="LEFT"><B>ECS projector</B><BR/><FONT POINT-SIZE="10">Read pending objects</FONT></TD></TR></TABLE>>];
+rds [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/RDS.png"/></TD><TD ALIGN="LEFT"><B>PostgreSQL</B><BR/><FONT POINT-SIZE="10">Ledger and business rows</FONT></TD></TR></TABLE>>];
+dlq [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/SimpleQueueService.png"/></TD><TD ALIGN="LEFT"><B>Dead-letter queue</B><BR/><FONT POINT-SIZE="10">Exhausted receives</FONT></TD></TR></TABLE>>];
+}
+hook -> api [label="signed request",style=solid];
+api -> verify [label="invoke",style=dashed];
+verify -> q [label="enqueue",style=solid];
+q -> land [label="event source mapping",style=solid];
+q -> dlq [label="redrive",style=solid];
+land -> obj [label="archive",style=solid];
+land -> idx [label="register pending",style=solid];
+land -> ctl [label="wake",style=dashed];
+ctl -> worker [label="launch when ready",style=dashed];
+obj -> worker [label="payload",style=solid];
+idx -> worker [label="pending keys",style=solid];
+worker -> rds [label="transaction",style=solid];
+}

@@ -1,0 +1,30 @@
+digraph G {
+graph [rankdir=LR, bgcolor="white", pad=0.25, nodesep=0.34, ranksep=0.48, fontname="Helvetica", fontsize=19, labelloc=t, label="Network paths in the Frankfurt deployment"];
+node [shape=box,style="rounded,filled",color="#ccd7e0",fillcolor="white",fontname="Helvetica",margin="0.12,0.09"];
+edge [color="#335772",fontcolor="#28465b",fontname="Helvetica",fontsize=11,arrowsize=0.7];
+subgraph cluster_aws { label="AWS Region · Europe (Frankfurt)"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+s3 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/SimpleStorageService.png"/></TD><TD ALIGN="LEFT"><B>Amazon S3</B><BR/><FONT POINT-SIZE="10">Regional service</FONT></TD></TR></TABLE>>];
+subgraph cluster_vpc { label="Project VPC"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+ig [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/VPCInternetGateway.png"/></TD><TD ALIGN="LEFT"><B>Internet gateway</B><BR/><FONT POINT-SIZE="10">Attached to VPC</FONT></TD></TR></TABLE>>];
+endpoint [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD ALIGN="LEFT"><B>S3 gateway endpoint</B><BR/><FONT POINT-SIZE="10">Application route tables</FONT></TD></TR></TABLE>>];
+subgraph cluster_pub { label="Public subnets · two AZs"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+nat [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/VPCNATGateway.png"/></TD><TD ALIGN="LEFT"><B>On-demand NAT</B><BR/><FONT POINT-SIZE="10">One active gateway per window</FONT></TD></TR></TABLE>>];
+host [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/EC2.png"/></TD><TD ALIGN="LEFT"><B>Tableau access host</B><BR/><FONT POINT-SIZE="10">SSM managed instance</FONT></TD></TR></TABLE>>];
+}
+subgraph cluster_app { label="Private application subnets · two AZs"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+ecs [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/ElasticContainerService.png"/></TD><TD ALIGN="LEFT"><B>Fargate tasks</B><BR/><FONT POINT-SIZE="10">Private task ENIs</FONT></TD></TR></TABLE>>];
+wh [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Redshift.png"/></TD><TD ALIGN="LEFT"><B>Redshift Serverless</B><BR/><FONT POINT-SIZE="10">Private workgroup endpoint</FONT></TD></TR></TABLE>>];
+}
+subgraph cluster_db { label="Isolated database subnets · two AZs"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+rds [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/RDS.png"/></TD><TD ALIGN="LEFT"><B>PostgreSQL</B><BR/><FONT POINT-SIZE="10">Database subnet group</FONT></TD></TR></TABLE>>];
+}
+}
+}
+ecs -> rds [label="projector / PostgreSQL",style=solid];
+ecs -> wh [label="dbt / SQL",style=solid];
+host -> wh [label="forwarded connection",style=solid];
+ecs -> nat [label="outbound default route",style=solid];
+nat -> ig [label="internet egress",style=solid];
+ecs -> endpoint [label="S3 prefix list",style=solid];
+endpoint -> s3 [label="private S3 traffic",style=solid];
+}

@@ -8,7 +8,7 @@ Its templating is Jinja. `source()` declares Silver Redshift dependencies,
 `ref()` declares transformations and yields an ordered lineage DAG.
 Models are SQL SELECTs materialized as views or tables.
 
-This model consumes **only Glue-validated S3 Silver already loaded to Redshift**
+This model consumes **Silver already loaded to Redshift**
 (not RDS operational tables or raw S3 objects). The Glue-to-Redshift source load has been reconciled, and dbt models and tests completed in the last verified evening warehouse run.
 
 ## Redshift schema layout
@@ -112,7 +112,7 @@ Also use chronological customer-month holdouts, never randomly split rows.
 
 Shopify ingested -> RDS projector completed -> Glue (RDS full snapshot →
 S3 Bronze → validated S3 Silver) -> verified Silver manifest ->
-transactional Redshift COPY/upsert to `silver_staging` ->
+transactional Redshift COPY and Shopify snapshot replacement to `silver_staging` ->
 `dbt build` -> curated Redshift BI views -> Tableau live queries and SQL churn scoring.
 
 The source schema has been renamed; the deployed dbt runtime uses a private Redshift connection and the `analytics_staging` and `analytics_marts` namespaces. Continue checking access, test results and data freshness after each ingestion run.

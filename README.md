@@ -1,55 +1,41 @@
 # Real-Time E-commerce Analytics
 
-AWS-based Shopify order ingestion, operational processing, dimensional analytics, and customer-retention modeling. Shopify transactions in this demonstration are **synthetic**; historical Online Retail II data and generated events have distinct provenance.
+How do you turn repeated, occasionally out-of-order Shopify notifications into trustworthy sales and retention reports? This AWS project captures signed webhooks while PostgreSQL can be stopped, projects them into operational records, and publishes reconciled snapshots to a private Redshift Serverless warehouse. Tableau users can follow an order from its source through a sales fact or examine a customer's estimated risk of placing no orders in the next 30 days.
 
-## End-to-end pipeline
+![End-to-end architecture from Shopify to Tableau](docs/architecture/diagrams/exports/overview.svg)
 
-```mermaid
-flowchart LR
-    A["EventBridge<br/>ECS order generator"] --> B["Shopify<br/>development store"]
-    B -->|Webhooks| C["API Gateway<br/>FastAPI Lambda"]
-    C --> D["SQS + landing Lambda<br/>S3 event archive"]
-    D --> E["ECS projector<br/>RDS PostgreSQL"]
-    E --> F["AWS Glue<br/>S3 Bronze / Silver"]
-    F --> G["Redshift Serverless<br/>dbt analytics marts"]
-    G --> H["Tableau<br/>dashboards"]
+## What the platform produces
 
-    D -.-> I["DynamoDB<br/>coordination"]
-    C -.-> J["SQS DLQ<br/>failed events"]
+| Responsibility | Implementation | Result |
+| --- | --- | --- |
+| Transaction simulation | Historical Online Retail II calibration, Shopify development store, scheduled ECS tasks | Reproducible historical backfill and distinct live synthetic orders |
+| Event capture | API Gateway, FastAPI on Lambda, SQS, S3, DynamoDB | Signed deliveries archived independently of RDS availability |
+| Operational processing | ECS on Fargate, RDS PostgreSQL | Deduplicated order, line and refund projections |
+| Warehouse refresh | AWS Glue, Amazon S3, Redshift Data API | Validated Silver snapshots and a manifest load ledger |
+| Analytics | dbt Core on Fargate, Redshift SQL | Sales dimensions and facts, daily sales, churn features and a categorical Naive Bayes baseline |
+| Reporting | Tableau Desktop, Systems Manager port forwarding | Read-only access to sales and churn views |
 
-    classDef process fill:#eef4ff,stroke:#5278b8,color:#1e293b,stroke-width:1px
-    classDef storage fill:#e9f6f1,stroke:#358067,color:#1e293b,stroke-width:1px
-    classDef exception fill:#fff4e5,stroke:#ba8740,color:#1e293b,stroke-width:1px
-    class A,B,C,F,H process
-    class D,E,G,I storage
-    class J exception
-```
+## Explore the project
 
-- **Ingestion and operations:** Shopify event generation, webhook validation, durable event storage, queue-based processing, and private PostgreSQL operational state.
-- **Analytics:** Glue extraction and validation, Redshift staging, dbt dimensions/facts and churn-feature marts with data-quality tests.
-- **Reporting:** Tableau connects to Redshift analytics schemas through controlled read-only access.
-- **Infrastructure:** Terraform and CloudFormation manage AWS resources in `eu-central-1`. Deployment uses private application and isolated database networking where required.
+1. [Architecture and design decisions](docs/architecture/README.md) explains network paths, ownership and why the system separates capture, projection and analysis.
+2. [Pipeline guide](docs/pipelines/README.md) follows a delivery and a scheduled processing slot through success, retry and reconciliation.
+3. [Data model and lineage](docs/data-model/README.md) covers PostgreSQL constraints, analytical grains and metric interpretation.
+4. [Operations and recovery](docs/operations/README.md) covers deployment boundaries, verification, failure diagnosis and shutdown.
+5. [Tableau connection guide](docs/tableau_redshift_connectivity.md) and [SQL model evaluation](docs/churn_sql_model_v1.md) explain how to consume the results. The workbook is managed separately.
+6. [Documentation validation](docs/validation.md) records the evidence and checks behind these guides.
 
-The churn model and transactions are a demonstration, **not** a production decision system or real-customer revenue pipeline.
+## Implementation status
 
-## Repository guide
+The November 21 checkpoint recorded a successful Glue → Redshift → dbt run. The November 24 infrastructure record confirms retirement of 23 legacy resources and cleanup of obsolete Terraform outputs. These dated observations answer different questions. To establish freshness for a reporting day, match its slot marker, manifest, warehouse acknowledgement and dbt exit status in the operations guide.
 
-| Location | Purpose |
-| --- | --- |
-| `src/ecommerce/` | Domain, application, and interfaces |
-| `scripts/`, `scripts/aws/`, `scripts/glue/` | Ingestion, deployment and orchestration |
-| `docker/` | Container build definitions (root build context) |
-| `infrastructure/terraform/` | Core AWS infrastructure as code |
-| `infrastructure/cloudformation/` | Separately managed infrastructure stacks |
-| `analytics/dbt/`, `analytics/redshift/`, `scripts/redshift/` | Warehouse transformations, SQL and access controls |
-| `tests/` | Unit, integration and infrastructure checks |
+## Start locally
 
-## Local development
+From the repository root with Python 3.12, install the development dependencies and run the same application checks as Python CI. No AWS deployment is required for these checks.
 
-```powershell
-python -m pip install -e ".[dev,historical,aws]"
+```sh
+python -m pip install -e ".[dev,api,shopify,historical,postgres,aws]"
 ruff check src tests
 python -m pytest -q tests/unit
 ```
 
-Read [Terraform safeguards](infrastructure/terraform/README.md) before changing AWS resources. Historical ingestion entrypoints are documented in [scripts/README.md](scripts/README.md).
+For historical ingestion, start with the [script guide](scripts/README.md). For the deployed platform, start with [read-only verification](docs/operations/README.md). Local unit tests use fixtures and mocks. Live ingestion creates transactions in the configured development store.

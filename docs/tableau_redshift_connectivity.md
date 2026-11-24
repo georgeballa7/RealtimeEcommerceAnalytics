@@ -1,6 +1,6 @@
 # Tableau Desktop → private Redshift
 
-Tableau Desktop uses a **read-only** Redshift identity via an AWS Systems Manager (SSM) tunnel through the dedicated EC2 access instance. Redshift itself stays private. The EC2 host is in a public subnet **without a public IP or inbound SSH/RDP rule**.
+Tableau Desktop uses a **read-only** Redshift identity via an AWS Systems Manager (SSM) tunnel through the dedicated EC2 access instance. Redshift itself stays private. The EC2 host is in a public subnet with explicit public IPv4 association in the stack template. Session Manager uses an outbound connection. The access security group has no inbound SSH/RDP rule.
 
 ## Connect
 
