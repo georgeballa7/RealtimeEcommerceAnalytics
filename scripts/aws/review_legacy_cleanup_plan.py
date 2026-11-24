@@ -91,7 +91,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
     args = parser.parse_args()
-    result = review(json.loads(args.plan.read_text(encoding="utf-8")))
+    result = review(json.loads(args.plan.read_text(encoding="utf-8-sig")))
     print(f"PASS: {len(result)} allowlisted legacy deletions, no other planned mutations")
     for address in result:
         print("DELETE", address)
