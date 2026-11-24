@@ -2,7 +2,7 @@
 # and schema migration. It is NOT an ALB service security group.
 resource "aws_security_group" "ecs" {
   name_prefix = "ecommerce-ecs-"
-  description = "On-demand Phase 5 ECS tasks accessing private RDS"
+  description = "Private API tasks"
   vpc_id = aws_vpc.ecommerce.id
 }
 resource "aws_security_group" "rds" {
