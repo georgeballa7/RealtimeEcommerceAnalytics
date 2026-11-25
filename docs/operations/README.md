@@ -1,5 +1,42 @@
 # Operating the Frankfurt deployment
 
+## Developer: start here
+
+This repository contains **runnable local checks** and **AWS-connected operational workflows**. You do not need an AWS account, a Shopify store, or a running database to start reading the code and running the unit tests. Do not treat the commands used for a live deployment as a local quick-start.
+
+### First 15 minutes
+
+1. Read the [project overview](../../README.md) to understand the business outcome and technology choices.
+2. Read the [pipeline walkthrough](../pipelines/README.md) to follow one signed Shopify delivery to the warehouse.
+3. In the repository root, create a Python 3.12+ environment and install the relevant extras:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,api,shopify,historical,postgres,aws]"
+ruff check src tests
+python -m pytest -q tests/unit
+```
+
+On macOS/Linux, use `source .venv/bin/activate`. **Do not run integration or end-to-end tests against an AWS account until their external-service requirements are understood.**
+
+4. Follow one change through the code: the [HTTP webhook handler](../../src/ecommerce/interfaces/http/shopify_webhooks.py), [S3 landing worker](../../src/ecommerce/interfaces/workers/shopify_s3_lambda.py), [RDS projector](../../src/ecommerce/interfaces/workers/phase5_project_s3.py), and [their processing explanation](../pipelines/README.md#capture-and-projection).
+5. For a transformation change, inspect [Glue Silver](../../scripts/glue/phase6_shopify_silver.py), [dbt models](../../analytics/dbt/models), [dbt tests](../../analytics/dbt/tests), and the [data-model guide](../data-model/README.md) **before** modifying warehouse definitions.
+
+### Where a change belongs
+
+| If you want to… | Look in… | Validate with… |
+| --- | --- | --- |
+| Change webhook validation or queue handling | `src/ecommerce/interfaces/http/`, `src/ecommerce/interfaces/workers/` | Python unit tests; relevant integration fixtures |
+| Change synthetic order generation or schedules | `scripts/`, `infrastructure/terraform/`, `infrastructure/cloudformation/` | Idempotency tests; scheduled-job and operation-journal review |
+| Change operational database constraints | `infrastructure/sql/` | Migration review, projector tests and rollback plan |
+| Change Silver extraction or quality rules | `scripts/glue/`, `docs/phase6_shopify_silver_contract.md` | Schema/contract tests; batch-manifest checks |
+| Add analytics metrics or marts | `analytics/dbt/models/`, `analytics/dbt/tests/` | dbt parsing and data tests in a suitably configured environment |
+| Change private networking or the NAT controller | `infrastructure/terraform/`, `scripts/aws/` | Terraform validation, NAT unit tests, reviewed **state-aware plan** |
+| Change Tableau access | `infrastructure/cloudformation/`, `docs/tableau_redshift_connectivity.md` | Stack ownership review and read-only connection checks |
+
+**Read-only versus mutating:** Listing AWS resources, reading status, and running unit tests are normally observation tasks. Creating Shopify orders, running backfills, applying Terraform plans, deploying CloudFormation stacks, refitting model parameters, or starting paid AWS compute are not. Use a development environment and explicit approval for changes that affect shared resources.
+
 ## Verify a slot with read-only access
 
 Identify the Europe/Berlin processing date and slot. The generator uses morning/afternoon, while a downstream dbt marker uses morning/evening. Carry the batch ID through the following checks. Resource names are available in the configured deployment and CloudFormation outputs.
