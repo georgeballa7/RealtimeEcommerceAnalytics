@@ -73,12 +73,6 @@ On macOS/Linux, activate with `source .venv/bin/activate`. The unit tests use fi
 
 For the original historical workbook workflow, use the [historical scripts guide](scripts/README.md). For the live platform, do **not** use sample Terraform variables against a deployed account: infrastructure plans require the complete, verified deployment settings.
 
-## How fresh are the results?
-
-The documentation records a successful Glue → Redshift → dbt processing checkpoint on **21 November 2026** and the retirement of **23 obsolete AWS resources on 24 November 2026**. These are dated observations, not a claim that a particular reporting date is current.
-
-To verify a new processing day, use the [read-only slot verification checklist](docs/operations/README.md#verify-a-slot-with-read-only-access).
-
 ## Documentation map
 
 - [Architecture and network](docs/architecture/README.md) — high-level system, routing, security and design trade-offs.
