@@ -48,9 +48,13 @@ def check_connection(*, host: str, database: str, username: str, password: str):
         user=username,
         password=password,
         ssl=True,
-        timeout=30,
+        timeout=120,
     )
     try:
+        # Redshift's first implicit BEGIN timed out in the initial Fargate
+        # AuthCheck (30-second socket read). Avoid an unnecessary transaction
+        # for this read-only handshake; dbt manages its own SQL sessions.
+        connection.autocommit = True
         cursor = connection.cursor()
         try:
             cursor.execute("SELECT current_user, current_database()")

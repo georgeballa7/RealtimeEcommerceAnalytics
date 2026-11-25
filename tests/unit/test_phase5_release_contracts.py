@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 def test_generator_container_uses_slot_runner():
-    docker = (ROOT / "Dockerfile.phase5-generator").read_text()
+    docker = (ROOT / "docker/Dockerfile.phase5-generator").read_text()
     assert 'ENTRYPOINT ["python", "scripts/phase5_slot_runner.py"]' in docker
     assert "phase5_slot_runner.py ./scripts/phase5_slot_runner.py" in docker
 
@@ -54,7 +54,7 @@ def test_generator_manifest_checksum_survives_windows_checkout():
 
 
 def test_generator_dockerfile_normalizes_manifest_before_verifying_sha():
-    docker = (ROOT / "Dockerfile.phase5-generator").read_text()
+    docker = (ROOT / "docker/Dockerfile.phase5-generator").read_text()
     source = (ROOT / "scripts/generate_shopify_live_orders.py").read_text()
     assert "b=p.read_bytes().replace(b'\\r\\n',b'\\n')" in docker
     assert "p.write_bytes(b)" in docker

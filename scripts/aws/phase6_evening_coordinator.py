@@ -22,7 +22,7 @@ CTRL_ID = "phase5-controller"
 # Keep the original afternoon key to preserve existing same-day run records.
 # The morning slot gets a distinct idempotency key in the SAME controller table.
 SLOT_IDS = {"morning": "phase6-morning", "afternoon": "phase6-evening"}
-SLOT_HOURS = {"morning": range(8, 16), "afternoon": (22, 23, 0, 1, 2)}
+SLOT_HOURS = {"morning": range(8, 16), "afternoon": (16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2)}
 CLUSTER = "ecommerce-demo"
 RDS_ID = "ecommerce-postgres-dev"
 JOB = "ecommerce-phase6-shopify-silver-demo"
@@ -45,8 +45,8 @@ def quiet_now(now, controller, dynamodb, sqs, ecs, *, slot="afternoon", s3=None)
         return "phase5_not_ready"
     if controller.get("error_hold") or controller.get("worker_task_arn"):
         return "projection_not_finished"
-    # The combined generator publishes this marker only after Shopify order
-    # generation AND settled cancellation/refund processing succeeded.
+    # The end-of-day lifecycle publishes this marker only after both Shopify
+    # generation slots and settled cancellation/refund processing succeeded.
     # Without it, quiet queues could represent a failed generator, not success.
     if s3 is not None:
         from botocore.exceptions import ClientError
@@ -185,7 +185,7 @@ def release(control, owner):
 
 
 def processing_day(local, slot):
-    """After midnight the 22:00 lifecycle belongs to yesterday in Berlin."""
+    """After midnight the recovering 17:00 lifecycle belongs to yesterday."""
     day = local.date()
     if slot == "afternoon" and local.hour < 3:
         day -= timedelta(days=1)
@@ -194,6 +194,8 @@ def processing_day(local, slot):
 
 def slot_for_time(local):
     """Which generator slot can advance in the current Berlin local time window?"""
+    if local.hour == 16 and local.minute < 30:
+        return None  # Lifecycle has not started; never snapshot early.
     return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)
 
 
@@ -208,8 +210,8 @@ def handler(event, context):
     aws = boto3.Session(region_name=REGION)
     ddb = aws.resource("dynamodb")
     table = ddb.Table(TABLE)
-    # A morning Glue run still active at 22:00 must complete before the
-    # nightly lifecycle snapshot reserves its own RDS/Glue lease.
+    # A morning Glue run still active at 17:00 must complete before the
+    # end-of-day lifecycle snapshot reserves its own RDS/Glue lease.
     # Prevent overlapping Glue full-state extracts.
     if slot == "afternoon":
         morning = table.get_item(

@@ -1,0 +1,22 @@
+digraph G {
+graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.34, ranksep=0.48, fontname="Helvetica", fontsize=19, labelloc=t, label="Shopify orders to customer retention reporting"];
+node [shape=box,style="rounded,filled",color="#ccd7e0",fillcolor="white",fontname="Helvetica",margin="0.12,0.09"];
+edge [color="#335772",fontcolor="#28465b",fontname="Helvetica",fontsize=11,arrowsize=0.7];
+store [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD ALIGN="LEFT"><B>Shopify development store</B><BR/><FONT POINT-SIZE="10">Synthetic transactions</FONT></TD></TR></TABLE>>];
+bi [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD ALIGN="LEFT"><B>Tableau Desktop</B><BR/><FONT POINT-SIZE="10">Read-only reporting</FONT></TD></TR></TABLE>>];
+subgraph cluster_aws { labeljust=r; label="eu-central-1"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+gen [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/ElasticContainerService.png"/></TD><TD ALIGN="LEFT"><B>Scheduled ECS generator</B><BR/><FONT POINT-SIZE="10">EventBridge Scheduler</FONT></TD></TR></TABLE>>];
+api [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/APIGateway.png"/></TD><TD ALIGN="LEFT"><B>API Gateway + Lambda</B><BR/><FONT POINT-SIZE="10">Signed webhook ingestion</FONT></TD></TR></TABLE>>];
+landing [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/SimpleStorageService.png"/></TD><TD ALIGN="LEFT"><B>SQS → Lambda → S3</B><BR/><FONT POINT-SIZE="10">Durable event landing</FONT></TD></TR></TABLE>>];
+proj [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/ElasticContainerService.png"/></TD><TD ALIGN="LEFT"><B>ECS projector → RDS</B><BR/><FONT POINT-SIZE="10">Operational order state</FONT></TD></TR></TABLE>>];
+silver [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Glue.png"/></TD><TD ALIGN="LEFT"><B>AWS Glue → S3</B><BR/><FONT POINT-SIZE="10">Validated Silver snapshot</FONT></TD></TR></TABLE>>];
+wh [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Redshift.png"/></TD><TD ALIGN="LEFT"><B>Redshift Serverless</B><BR/><FONT POINT-SIZE="10">dbt marts and SQL classifier</FONT></TD></TR></TABLE>>];
+}
+gen -> store [label="create orders",style=solid];
+store -> api [label="signed webhook",style=solid];
+api -> landing [label="event envelope",style=solid];
+landing -> proj [label="archived payload",style=solid];
+proj -> silver [label="JDBC extract",style=solid];
+silver -> wh [label="committed manifest",style=solid];
+wh -> bi [label="query results via SSM",style=solid];
+}

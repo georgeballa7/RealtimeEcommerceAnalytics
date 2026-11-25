@@ -1,0 +1,21 @@
+digraph G {
+graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.34, ranksep=0.48, fontname="Helvetica", fontsize=19, labelloc=t, label="Silver publication and warehouse serving"];
+node [shape=box,style="rounded,filled",color="#ccd7e0",fillcolor="white",fontname="Helvetica",margin="0.12,0.09"];
+edge [color="#335772",fontcolor="#28465b",fontname="Helvetica",fontsize=11,arrowsize=0.7];
+tab [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD ALIGN="LEFT"><B>Tableau Desktop</B><BR/><FONT POINT-SIZE="10">Read-only session</FONT></TD></TR></TABLE>>];
+subgraph cluster_aws { label="AWS Region · Europe (Frankfurt)"; fontsize=14; fontcolor="#274c63"; penwidth=1.3; color="#90aab6"; style="rounded"; margin=16;
+pg [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/RDS.png"/></TD><TD ALIGN="LEFT"><B>RDS PostgreSQL</B><BR/><FONT POINT-SIZE="10">Operational snapshot source</FONT></TD></TR></TABLE>>];
+gl [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Glue.png"/></TD><TD ALIGN="LEFT"><B>AWS Glue</B><BR/><FONT POINT-SIZE="10">Extract and reconcile</FONT></TD></TR></TABLE>>];
+s [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/SimpleStorageService.png"/></TD><TD ALIGN="LEFT"><B>Amazon S3</B><BR/><FONT POINT-SIZE="10">Bronze, quarantine and Silver</FONT></TD></TR></TABLE>>];
+l [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Lambda.png"/></TD><TD ALIGN="LEFT"><B>Silver loader</B><BR/><FONT POINT-SIZE="10">Validate committed manifest</FONT></TD></TR></TABLE>>];
+rs [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/Redshift.png"/></TD><TD ALIGN="LEFT"><B>Redshift Serverless</B><BR/><FONT POINT-SIZE="10">Silver staging → marts → ML / BI</FONT></TD></TR></TABLE>>];
+dbt [label=<<TABLE BORDER="0" CELLBORDER="0" CELLPADDING="3"><TR><TD FIXEDSIZE="TRUE" WIDTH="36" HEIGHT="36"><IMG SCALE="TRUE" SRC="icons/ElasticContainerService.png"/></TD><TD ALIGN="LEFT"><B>dbt on Fargate</B><BR/><FONT POINT-SIZE="10">Build models and run tests</FONT></TD></TR></TABLE>>];
+}
+pg -> gl [label="JDBC",style=solid];
+gl -> s [label="snapshot and manifest",style=solid];
+s -> l [label="manifest metadata",style=solid];
+l -> rs [label="submit warehouse transaction",style=dashed];
+s -> rs [label="COPY accepted data",style=solid];
+dbt -> rs [label="execute SQL",style=dashed];
+rs -> tab [label="views via SSM tunnel",style=solid];
+}

@@ -1,0 +1,245 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Cost-light five-minute Phase6 Berlin evening ingest to Glue coordinator with RDS lease",
+  "Resources": {
+    "CoordinatorRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "ecommerce-phase6-evening-coordinator-role-demo",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "phase6-evening-data-control",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:TransactWriteItems"
+                  ],
+                  "Resource": "arn:aws:dynamodb:eu-central-1:825414820081:table/ecommerce-demo-phase5-controller",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "dynamodb:Query"
+                  ],
+                  "Resource": "arn:aws:dynamodb:eu-central-1:825414820081:table/ecommerce-demo-phase5-events/index/by_state",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "sqs:GetQueueAttributes"
+                  ],
+                  "Resource": "arn:aws:sqs:eu-central-1:825414820081:ecommerce-demo-events",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "ecs:ListTasks"
+                  ],
+                  "Resource": "arn:aws:ecs:eu-central-1:825414820081:cluster/ecommerce-demo",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "rds:DescribeDBInstances"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "rds:StartDBInstance"
+                  ],
+                  "Resource": "arn:aws:rds:eu-central-1:825414820081:db:ecommerce-postgres-dev",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "glue:StartJobRun",
+                    "glue:GetJobRun",
+                    "glue:GetJobRuns"
+                  ],
+                  "Resource": "arn:aws:glue:eu-central-1:825414820081:job/ecommerce-phase6-shopify-silver-demo",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": "arn:aws:s3:::ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6/warehouse/shopify_snapshots/v1/*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": "arn:aws:lambda:eu-central-1:825414820081:function:ecommerce-phase6-silver-redshift-loader-demo",
+                  "Effect": "Allow"
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "read-phase5-combined-slot-commit-marker",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": "arn:aws:s3:::ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6/simulation/phase5/slots/v1/*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:ListTasks"
+                  ],
+                  "Resource": "arn:aws:ecs:eu-central-1:825414820081:container-instance/ecommerce-demo/*",
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": "arn:aws:ecs:eu-central-1:825414820081:cluster/ecommerce-demo"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "phase6-coordinator-list-marker-prefixes",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "ListOnlyCoordinatorMarkerPrefixes",
+                  "Effect": "Allow",
+                  "Action": "s3:ListBucket",
+                  "Resource": "arn:aws:s3:::ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6",
+                  "Condition": {
+                    "StringLike": {
+                      "s3:prefix": [
+                        "simulation/phase5/slots/v1/*",
+                        "warehouse/shopify_snapshots/v1/*"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CoordinatorFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "ecommerce-phase6-evening-glue-coordinator-demo",
+        "Description": "Wait for stable Phase5 orders, hold RDS lease, run Glue, dispatch Redshift loader",
+        "Runtime": "python3.12",
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "CoordinatorRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "ZipFile": "\"\"\"Low-cost coordinator: morning AND afternoon Shopify -> RDS -> Glue Silver.\n\nExisting 08:00/16:00 Shopify generator schedules create the orders. A separate\nfive-minute readiness poll checks ingestion/projector quietness and starts at\nmost ONE Glue snapshot for EACH daily slot. The successful-Glue event triggers\nthe existing idempotent Silver-to-Redshift loader. No extra generator runs.\n\"\"\"\nfrom __future__ import annotations\n\nimport json\nfrom datetime import datetime, timezone, timedelta\nfrom uuid import uuid4\nfrom zoneinfo import ZoneInfo\n\nimport boto3\nfrom botocore.exceptions import ClientError\n\nREGION = \"eu-central-1\"\nTABLE = \"ecommerce-demo-phase5-controller\"\nEVENTS_TABLE = \"ecommerce-demo-phase5-events\"\nCTRL_ID = \"phase5-controller\"\n# Keep the original afternoon key to preserve existing same-day run records.\n# The morning slot gets a distinct idempotency key in the SAME controller table.\nSLOT_IDS = {\"morning\": \"phase6-morning\", \"afternoon\": \"phase6-evening\"}\nSLOT_HOURS = {\"morning\": range(8, 16), \"afternoon\": (16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2)}\nCLUSTER = \"ecommerce-demo\"\nRDS_ID = \"ecommerce-postgres-dev\"\nJOB = \"ecommerce-phase6-shopify-silver-demo\"\nLOADER = \"ecommerce-phase6-silver-redshift-loader-demo\"\nQUEUE = \"https://sqs.eu-central-1.amazonaws.com/825414820081/ecommerce-demo-events\"\nBUCKET = \"ecommerce-demo-landing-393e7fdc5c01861ae4e5c25ad6\"\nTTL = 45 * 60\nQUIET = 10 * 60\nACTIVE = {\"STARTING\", \"RUNNING\", \"WAITING\", \"STOPPING\"}\nFAILURES = {\"FAILED\", \"ERROR\", \"TIMEOUT\", \"STOPPED\", \"EXPIRED\"}\n\n\ndef log(action, **fields):\n    print(json.dumps({\"phase6_coordinator\": action, **fields}, sort_keys=True))\n    return {\"action\": action, **fields}\n\n\ndef quiet_now(now, controller, dynamodb, sqs, ecs, *, slot=\"afternoon\", s3=None):\n    if not controller.get(\"schema_ready\") or not controller.get(\"webhooks_ready\"):\n        return \"phase5_not_ready\"\n    if controller.get(\"error_hold\") or controller.get(\"worker_task_arn\"):\n        return \"projection_not_finished\"\n    # The end-of-day lifecycle publishes this marker only after both Shopify\n    # generation slots and settled cancellation/refund processing succeeded.\n    # Without it, quiet queues could represent a failed generator, not success.\n    if s3 is not None:\n        from botocore.exceptions import ClientError\n        local = now.astimezone(ZoneInfo(\"Europe/Berlin\"))\n        pipeline_day = processing_day(local, slot)\n        compact_day = pipeline_day.replace(\"-\", \"\")\n        required = [(\"generation\", slot)]\n        if slot == \"afternoon\":\n            required.extend([(\"generation\", \"morning\"), (\"lifecycle\", \"night\")])\n        for kind, marker_slot in required:\n            if kind == \"generation\":\n                run_id = f\"live-{compact_day}-{marker_slot}\"\n                key = f\"simulation/phase5/slots/v1/{run_id}.json\"\n                expected = {\"schema_version\": 1, \"run_id\": run_id,\n                            \"slot\": marker_slot, \"generation\": \"complete\"}\n            else:\n                key = f\"simulation/phase5/slots/v1/lifecycle-{pipeline_day}.json\"\n                expected = {\"schema_version\": 1, \"day\": pipeline_day,\n                            \"lifecycle\": \"settled\",\n                            \"generation_slots\": [\"morning\", \"afternoon\"]}\n            try:\n                marker = json.loads(s3.get_object(Bucket=BUCKET, Key=key)[\"Body\"].read())\n            except ClientError as exc:\n                if exc.response.get(\"Error\", {}).get(\"Code\") in {\"NoSuchKey\", \"404\", \"NotFound\"}:\n                    return f\"{kind}_{marker_slot}_not_complete\"\n                raise\n            if marker != expected:\n                raise RuntimeError(f\"Invalid or conflicting readiness marker: {key}\")\n    last_event = controller.get(\"last_event_at\")\n    if not last_event:\n        return \"no_projected_slot_events\"\n    event_time = datetime.fromisoformat(last_event)\n    if slot not in SLOT_IDS:\n        raise ValueError(\"Unknown pipeline slot\")\n    start_hour = 8 if slot == \"morning\" else 16\n    local_day = processing_day(now.astimezone(ZoneInfo(\"Europe/Berlin\")), slot)\n    cutoff = datetime.fromisoformat(local_day).replace(\n        hour=start_hour, minute=0, second=0, microsecond=0,\n        tzinfo=ZoneInfo(\"Europe/Berlin\")).astimezone(timezone.utc)\n    if event_time < cutoff:\n        return \"no_events_after_slot_start\"\n    last_work = controller.get(\"last_work_at\")\n    activity = max(event_time, datetime.fromisoformat(last_work)) if last_work else event_time\n    if now.timestamp() - activity.timestamp() < QUIET:\n        return \"ingestion_quiet_window\"\n    # Pending projected events live in the Phase 5 event index, not the controller table.\n    events = dynamodb.Table(EVENTS_TABLE)\n    pending = events.query(\n        IndexName=\"by_state\",\n        KeyConditionExpression=\"#state=:pending\",\n        ExpressionAttributeNames={\"#state\": \"state\"},\n        ExpressionAttributeValues={\":pending\": \"pending\"},\n        Limit=1,\n    )\n    if pending.get(\"Items\"):\n        return \"pending_projection_events\"\n    attrs = sqs.get_queue_attributes(\n        QueueUrl=QUEUE,\n        AttributeNames=[\"ApproximateNumberOfMessages\", \"ApproximateNumberOfMessagesNotVisible\"],\n    )[\"Attributes\"]\n    if any(int(attrs.get(name, \"0\")) for name in (\n        \"ApproximateNumberOfMessages\", \"ApproximateNumberOfMessagesNotVisible\"\n    )):\n        return \"sqs_not_empty\"\n    for desired in (\"RUNNING\", \"PENDING\"):\n        if ecs.list_tasks(cluster=CLUSTER, desiredStatus=desired).get(\"taskArns\"):\n            return \"ecs_workload_still_active\"\n    return None\n\n\ndef reserve(ddb, day, batch, owner, now, *, day_id):\n    # Atomically own both the controller Glue stop-blocker and daily launch\n    # record; no partial reservation if controller is stopping RDS.\n    ddb.transact_write_items(\n        TransactItems=[\n            {\"Update\": {\n                \"TableName\": TABLE, \"Key\": {\"id\": {\"S\": CTRL_ID}},\n                \"UpdateExpression\": \"SET glue_lease_owner=:owner, glue_lease_expires_at=:exp\",\n                \"ConditionExpression\": (\n                    \"(attribute_not_exists(lease_until) OR lease_until < :now) \"\n                    \"AND attribute_not_exists(glue_lease_owner)\"\n                ),\n                \"ExpressionAttributeValues\": {\n                    \":owner\": {\"S\": owner}, \":exp\": {\"N\": str(now + TTL)},\n                    \":now\": {\"N\": str(now)},\n                },\n            }},\n            {\"Put\": {\n                \"TableName\": TABLE,\n                \"Item\": {\n                    \"id\": {\"S\": day_id}, \"day\": {\"S\": day},\n                    \"phase\": {\"S\": \"reserved\"}, \"owner\": {\"S\": owner},\n                    \"batch_id\": {\"S\": batch},\n                },\n                \"ConditionExpression\": \"attribute_not_exists(#day) OR #day <> :day\",\n                \"ExpressionAttributeNames\": {\"#day\": \"day\"},\n                \"ExpressionAttributeValues\": {\":day\": {\"S\": day}},\n            }},\n        ]\n    )\n\n\ndef renew(control, owner, now):\n    control.update_item(\n        Key={\"id\": CTRL_ID},\n        UpdateExpression=\"SET glue_lease_expires_at=:exp\",\n        ConditionExpression=\"glue_lease_owner=:owner AND glue_lease_expires_at > :now\",\n        ExpressionAttributeValues={\n            \":owner\": owner, \":exp\": now + TTL, \":now\": now,\n        },\n    )\n\n\ndef attach(control, owner, run_id, now):\n    control.update_item(\n        Key={\"id\": CTRL_ID},\n        UpdateExpression=\"SET glue_lease_job_run_id=:run, glue_lease_expires_at=:exp\",\n        ConditionExpression=(\n            \"glue_lease_owner=:owner AND glue_lease_expires_at > :now \"\n            \"AND attribute_not_exists(glue_lease_job_run_id)\"\n        ),\n        ExpressionAttributeValues={\n            \":owner\": owner, \":run\": run_id,\n            \":exp\": now + TTL, \":now\": now,\n        },\n    )\n\n\ndef release(control, owner):\n    control.update_item(\n        Key={\"id\": CTRL_ID},\n        UpdateExpression=\"REMOVE glue_lease_owner, glue_lease_expires_at, glue_lease_job_run_id\",\n        ConditionExpression=\"glue_lease_owner=:owner\",\n        ExpressionAttributeValues={\":owner\": owner},\n    )\n\n\ndef processing_day(local, slot):\n    \"\"\"After midnight the recovering 17:00 lifecycle belongs to yesterday.\"\"\"\n    day = local.date()\n    if slot == \"afternoon\" and local.hour < 3:\n        day -= timedelta(days=1)\n    return day.isoformat()\n\n\ndef slot_for_time(local):\n    \"\"\"Which generator slot can advance in the current Berlin local time window?\"\"\"\n    if local.hour == 16 and local.minute < 30:\n        return None  # Lifecycle has not started; never snapshot early.\n    return next((name for name, hours in SLOT_HOURS.items() if local.hour in hours), None)\n\n\ndef handler(event, context):\n    now = datetime.now(timezone.utc)\n    local = now.astimezone(ZoneInfo(\"Europe/Berlin\"))\n    slot = slot_for_time(local)\n    if slot is None:\n        return log(\"outside_slot_readiness_windows\")\n    day_id = SLOT_IDS[slot]\n    day = processing_day(local, slot)\n    aws = boto3.Session(region_name=REGION)\n    ddb = aws.resource(\"dynamodb\")\n    table = ddb.Table(TABLE)\n    # A morning Glue run still active at 17:00 must complete before the\n    # end-of-day lifecycle snapshot reserves its own RDS/Glue lease.\n    # Prevent overlapping Glue full-state extracts.\n    if slot == \"afternoon\":\n        morning = table.get_item(\n            Key={\"id\": SLOT_IDS[\"morning\"]}, ConsistentRead=True\n        ).get(\"Item\", {})\n        if morning.get(\"day\") == day and morning.get(\"phase\") in (\"reserved\", \"started\"):\n            slot = \"morning\"\n            day_id = SLOT_IDS[\"morning\"]\n    previous = table.get_item(Key={\"id\": day_id}, ConsistentRead=True).get(\"Item\", {})\n    ctrl = table.get_item(Key={\"id\": CTRL_ID}, ConsistentRead=True).get(\"Item\", {})\n    glue = aws.client(\"glue\")\n    rds = aws.client(\"rds\")\n    if previous.get(\"day\") != day:\n        reason = quiet_now(now, ctrl, ddb, aws.client(\"sqs\"), aws.client(\"ecs\"),\n                           slot=slot, s3=aws.client(\"s3\"))\n        if reason:\n            return log(\"waiting\", slot=slot, reason=reason)\n        owner = str(uuid4())\n        batch = now.strftime(\"%Y%m%dT%H%M%SZ\")\n        try:\n            reserve(aws.client(\"dynamodb\"), day, batch, owner, int(now.timestamp()), day_id=day_id)\n        except ClientError as e:\n            if e.response.get(\"Error\", {}).get(\"Code\") in (\n                \"TransactionCanceledException\", \"ConditionalCheckFailedException\"\n            ):\n                return log(\"reservation_busy\", slot=slot)\n            raise\n        previous = {\"day\": day, \"phase\": \"reserved\", \"owner\": owner, \"batch_id\": batch}\n    phase = previous[\"phase\"]\n    if phase in (\"completed\", \"failed\", \"warehouse_failed\"):\n        return log(phase, slot=slot, batch=previous[\"batch_id\"])\n    if phase == \"dispatched\":\n        attempts = int(previous.get(\"loader_attempts\", 1))\n        last = int(previous.get(\"loader_last_attempt_at\", 0))\n        if int(now.timestamp()) - last < 20 * 60:\n            return log(\"warehouse_pending\", slot=slot, attempts=attempts)\n        if attempts >= 3:\n            table.update_item(\n                Key={\"id\": day_id},\n                UpdateExpression=\"SET #phase=:failed\",\n                ConditionExpression=\"#phase=:dispatched\",\n                ExpressionAttributeNames={\"#phase\": \"phase\"},\n                ExpressionAttributeValues={\n                    \":failed\": \"warehouse_failed\", \":dispatched\": \"dispatched\"},\n            )\n            return log(\"warehouse_failed\", slot=slot, reason=\"loader_ack_timeout\")\n        table.update_item(\n            Key={\"id\": day_id},\n            UpdateExpression=\"SET loader_attempts=:attempts, loader_last_attempt_at=:now\",\n            ConditionExpression=\"#phase=:dispatched\",\n            ExpressionAttributeNames={\"#phase\": \"phase\"},\n            ExpressionAttributeValues={\n                \":attempts\": attempts + 1, \":now\": int(now.timestamp()),\n                \":dispatched\": \"dispatched\"},\n        )\n        response = aws.client(\"lambda\").invoke(\n            FunctionName=LOADER, InvocationType=\"Event\",\n            Payload=json.dumps({\n                \"source\": \"phase6-\" + slot, \"run_id\": previous[\"run_id\"],\n                \"batch_id\": previous[\"batch_id\"]}).encode(),\n        )\n        if response.get(\"StatusCode\") != 202:\n            raise RuntimeError(\"Silver loader retry invocation was not accepted\")\n        return log(\"warehouse_loader_reinvoked\", slot=slot, attempts=attempts + 1)\n    owner = previous[\"owner\"]\n    renew(table, owner, int(now.timestamp()))\n    if phase == \"reserved\":\n        status = rds.describe_db_instances(DBInstanceIdentifier=RDS_ID)[\"DBInstances\"][0][\"DBInstanceStatus\"]\n        if status == \"stopping\":\n            return log(\"rds_stopping\", slot=slot, batch=previous[\"batch_id\"])\n        if status == \"stopped\":\n            rds.start_db_instance(DBInstanceIdentifier=RDS_ID)\n            return log(\"rds_start_requested\", slot=slot, batch=previous[\"batch_id\"])\n        if status != \"available\":\n            return log(\"waiting_for_rds\", slot=slot, status=status)\n        batch = previous[\"batch_id\"]\n        # Recover from a crash after starting Glue but before recording the run.\n        matches = [\n            x for x in glue.get_job_runs(JobName=JOB, MaxResults=10).get(\"JobRuns\", [])\n            if x.get(\"Arguments\", {}).get(\"--batch-id\") == batch\n        ]\n        if matches:\n            run_id = matches[0][\"Id\"]\n        else:\n            run_id = glue.start_job_run(JobName=JOB, Arguments={\"--batch-id\": batch})[\"JobRunId\"]\n        attach(table, owner, run_id, int(now.timestamp()))\n        table.update_item(\n            Key={\"id\": day_id},\n            UpdateExpression=\"SET phase=:phase, run_id=:run\",\n            ConditionExpression=\"#day=:day AND #owner=:owner\",\n            ExpressionAttributeNames={\"#day\": \"day\", \"#owner\": \"owner\"},\n            ExpressionAttributeValues={\n                \":phase\": \"started\", \":run\": run_id, \":day\": day, \":owner\": owner,\n            },\n        )\n        return log(\"glue_started\", slot=slot, batch=batch, run_id=run_id)\n    if phase == \"started\":\n        run_id = previous[\"run_id\"]\n        state = glue.get_job_run(JobName=JOB, RunId=run_id)[\"JobRun\"][\"JobRunState\"]\n        if state in ACTIVE:\n            return log(\"glue_running\", slot=slot, run_id=run_id, state=state)\n        if state not in FAILURES | {\"SUCCEEDED\"}:\n            raise RuntimeError(\"Unexpected Glue state: \" + state)\n        if state == \"SUCCEEDED\":\n            key = f\"warehouse/shopify_snapshots/v1/{previous['batch_id']}/silver_manifest.json\"\n            aws.client(\"s3\").head_object(Bucket=BUCKET, Key=key)\n            next_phase = \"dispatched\"\n        else:\n            next_phase = \"failed\"\n        # Persist dispatch phase BEFORE sending the async request: a fast\n        # warehouse acknowledgment must never be overwritten as pending.\n        release(table, owner)\n        table.update_item(\n            Key={\"id\": day_id},\n            UpdateExpression=(\n                \"SET phase=:phase, glue_status=:status, \"\n                \"loader_attempts=:attempts, loader_last_attempt_at=:when\"\n            ),\n            ConditionExpression=\"#day=:day AND #owner=:owner\",\n            ExpressionAttributeNames={\"#day\": \"day\", \"#owner\": \"owner\"},\n            ExpressionAttributeValues={\n                \":phase\": next_phase, \":status\": state, \":day\": day, \":owner\": owner,\n                \":attempts\": 1 if state == \"SUCCEEDED\" else 0,\n                \":when\": int(now.timestamp()),\n            },\n        )\n        if state == \"SUCCEEDED\":\n            dispatched = aws.client(\"lambda\").invoke(\n                FunctionName=LOADER, InvocationType=\"Event\",\n                Payload=json.dumps({\n                    \"source\": \"phase6-\" + slot, \"run_id\": run_id,\n                    \"batch_id\": previous[\"batch_id\"]}).encode(),\n            )\n            if dispatched.get(\"StatusCode\") != 202:\n                raise RuntimeError(\"Silver loader invocation was not accepted\")\n        return log(next_phase, slot=slot, run_id=run_id, glue_status=state)\n    raise RuntimeError(\"Unknown Phase6 coordinator phase: \" + str(phase))\n"
+        },
+        "MemorySize": 256,
+        "Timeout": 60
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "ecommerce-phase6-evening-scheduler-role-demo",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "invoke-phase6-evening-coordinator",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "CoordinatorFunction",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "EveningSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "ecommerce-phase6-evening-glue-demo",
+        "Description": "Readiness polls every five minutes; afternoon processing is gated by the 16:30 lifecycle completion marker.",
+        "ScheduleExpression": "cron(0/5 0-2,8-15,16-23 * * ? *)",
+        "ScheduleExpressionTimezone": "Europe/Berlin",
+        "State": "ENABLED",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "CoordinatorFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{}",
+          "RetryPolicy": {
+            "MaximumRetryAttempts": 1
+          }
+        }
+      }
+    }
+  }
+}

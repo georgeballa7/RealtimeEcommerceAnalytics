@@ -1,21 +1,45 @@
-# Real-Time E-commerce Analytics
+# Real-Time E-commerce Analytics on AWS
 
-Layered Shopify-first e-commerce engineering and customer-retention analytics.
+**An event-driven data engineering project that turns Shopify transactions into reliable sales reporting and customer-retention insights.**
 
-## Data layers
+A sales event is only useful for analytics when it is **captured, processed once, reconciled, and reflected in the reporting tables**. This project builds that path end to end: simulated Shopify orders enter through secure webhooks, are processed into PostgreSQL, and then flow through AWS Glue, Amazon Redshift Serverless, and dbt into Tableau-ready data models.
 
-Immutable Online Retail II historical Bronze data is stored on S3. Silver contains canonical customer, product, variant, order and item records; missing customer IDs are quarantined and cross-sheet duplicate lines documented. All 5,942 identifiable customers remain in scope for later Shopify sync. Gold analytical models are planned.
+The platform is designed around an important constraint: **the private application database and outbound networking do not need to run continuously.** Incoming events can be accepted while RDS is stopped; scheduled processing and reconciliation carry them through to analytics later.
 
-## Architecture
+![End-to-end system architecture showing Shopify ingestion, AWS operational processing, warehouse, and Tableau](docs/architecture/diagrams/exports/overview.svg)
 
-AWS is the sole application runtime in `eu-central-1`. The Shopify development store is the external source; developer machines are used for code, notebooks, tests, Git, Terraform and AWS tooling, not for a second deployed Kubernetes/Kafka/PostgreSQL/Spark stack.
+## At a glance
 
-**Target event path:** Shopify signed webhooks → public HTTPS ALB → private ECS/Fargate FastAPI → RDS PostgreSQL inbox/outbox → ECS outbox publisher → SQS/DLQ → ECS consumer → durable S3 event landing → daily PySpark microbatch on ECS/Fargate → Redshift Serverless → dbt Core → Power BI. Customer identity synchronization runs as an on-demand ECS/Fargate task. Historical 2026 synthetic backfill is stored separately on S3 with explicit provenance; customer churn modeling with MLflow is planned.
+| Question | Answer |
+| --- | --- |
+| **What is this?** | A portfolio-scale, AWS-hosted e-commerce data platform covering event ingestion, transactional processing, analytics engineering, and churn modeling. |
+| **Why build it?** | To demonstrate how unreliable or out-of-order event delivery becomes trustworthy, auditable business data. |
+| **What data does it use?** | A Shopify development store with controlled synthetic transactions and a separately reconciled historical retail dataset. **Not live customer commerce.** |
+| **What can an analyst explore?** | Orders, sales trends, refunds, cancellations, customer segments, and a baseline estimate of 30-day inactivity risk. |
+| **What makes it interesting technically?** | Replay-safe processing, distinct operational and analytical stores, batch publication checks, private networking, and an on-demand NAT lifecycle. |
+| **Is it production-ready?** | No. It is an implemented learning and portfolio environment with tested safeguards; production use would need additional availability, security, operational, and data-governance work. |
 
-The Terraform-managed AWS foundation is provisioned, including the private RDS instance, ECS cluster, ECR repositories, SQS/DLQ and S3. As of 17 November 2026, no ECS tasks/services or active task definitions are running, and Redshift Serverless and Step Functions are not deployed. This infrastructure status does not imply end-to-end pipeline readiness. See the [architecture decision](docs/decisions/aws-ecs-sqs-microbatch.md).
+## See what was built
 
-## Workflow
+| Stage | Technology | Purpose |
+| --- | --- | --- |
+| **Generate** | Shopify development store, scheduled ECS tasks | Produce controlled orders and lifecycle events with traceable source identities. |
+| **Receive** | API Gateway, FastAPI on Lambda, SQS, S3 | Authenticate webhook deliveries and keep them durable even if PostgreSQL is offline. |
+| **Process** | DynamoDB, ECS/Fargate, Amazon RDS PostgreSQL | Reconcile pending events, apply order/refund changes, and prevent duplicate database effects. |
+| **Prepare** | AWS Glue, S3 Bronze/Silver | Extract and validate a complete processing snapshot before publication. |
+| **Analyze** | Redshift Serverless, dbt Core | Load verified batches and build dimensional models, metrics, and customer features. |
+| **Explore** | Redshift SQL, Tableau | Query sales marts and churn-scoring views through controlled private access. |
 
-Run the historical Bronze ingestion, Silver transformation and read-only Silver business audit using entrypoints in [scripts/README.md](scripts/README.md). The Python implementation lives in `src/ecommerce/pipelines/bronze/` and `src/ecommerce/pipelines/silver/`. The Shopify customer identity foundation and current deployment prerequisites are described in [README_IMPLEMENTATION.md](README_IMPLEMENTATION.md).
+**Example business question:** *Did yesterday's simulated orders reach the dashboard?* The answer is not merely “the webhook returned success.” The platform checks the source processing marker, event ledger, validated snapshot manifest, Redshift load acknowledgement, and dbt task outcome. [Follow that evidence path](docs/operations/README.md).
 
-Other concerns remain separate: `src/ecommerce/domain/`, `application/`, `infrastructure/`, and `interfaces/`; `apps/` for deployables; `infrastructure/bootstrap/` for remote Terraform state and `infrastructure/terraform/` for AWS resources; `analytics/`, `ml/`, `notebooks/`, `data/schemas/`, and `tests/` for their respective purposes.
+## Explore the project
+
+| Question | Guide |
+| --- | --- |
+| What do the sales and retention results mean? | [Sales, retention and validation](docs/sales-retention-and-validation.md) |
+| Why these AWS services and network boundaries? | [Architecture and decisions](docs/architecture/README.md) |
+| How does a Shopify delivery reach a report? | [Pipeline walkthrough](docs/pipelines/README.md) |
+| Which warehouse tables share dimensions? | [Analytical star schema](docs/data-model/README.md#analytical-star-schema) |
+| How do I run the local checks, connect Tableau or investigate a failed slot? | [Operations and local setup](docs/operations/README.md) |
+
+For the historical workbook workflow, use the [historical ingestion commands](scripts/README.md). For infrastructure planning, use the [Terraform module instructions](infrastructure/terraform/README.md).

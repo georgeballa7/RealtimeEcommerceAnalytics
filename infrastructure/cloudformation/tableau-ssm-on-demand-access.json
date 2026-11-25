@@ -1,0 +1,252 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "On-demand SSM-only Tableau Desktop access to a private ecommerce Redshift Serverless warehouse; zero inbound ports.",
+  "Parameters": {
+    "AmazonLinuxArm64Ami": {
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+    }
+  },
+  "Resources": {
+    "SsmInstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "ecommerce-tableau-ssm-instance-demo",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        ],
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "tableau-ssm-on-demand"
+          }
+        ]
+      }
+    },
+    "SsmInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "InstanceProfileName": "ecommerce-tableau-ssm-instance-demo",
+        "Roles": [
+          {
+            "Ref": "SsmInstanceRole"
+          }
+        ]
+      }
+    },
+    "TableauAccessSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "SSM-managed egress-only Tableau TCP tunnel; no inbound rules",
+        "VpcId": "vpc-076127eb4c8bb7437",
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "Description": "SSM service over HTTPS",
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "Description": "Private Redshift Serverless port",
+            "IpProtocol": "tcp",
+            "FromPort": 5439,
+            "ToPort": 5439,
+            "DestinationSecurityGroupId": "sg-0a2af03c0dda1e8fc"
+          },
+          {
+            "Description": "VPC DNS UDP",
+            "IpProtocol": "udp",
+            "FromPort": 53,
+            "ToPort": 53,
+            "CidrIp": "10.20.0.2/32"
+          },
+          {
+            "Description": "VPC DNS TCP",
+            "IpProtocol": "tcp",
+            "FromPort": 53,
+            "ToPort": 53,
+            "CidrIp": "10.20.0.2/32"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "ecommerce-tableau-ssm-access-demo"
+          }
+        ]
+      }
+    },
+    "RedshiftFromTableau": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "Description": "Scoped SSM Tableau tunnel to Redshift port 5439",
+        "GroupId": "sg-0a2af03c0dda1e8fc",
+        "IpProtocol": "tcp",
+        "FromPort": 5439,
+        "ToPort": 5439,
+        "SourceSecurityGroupId": {
+          "Ref": "TableauAccessSecurityGroup"
+        }
+      }
+    },
+    "TableauDatabaseIAMRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "ecommerce-tableau-bi-readonly-demo",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "arn:aws:iam::825414820081:user/george-admin"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "MaxSessionDuration": 3600,
+        "Policies": [
+          {
+            "PolicyName": "GetReadOnlyRedshiftTempCredentials",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "GetTemporaryDBPassword",
+                  "Effect": "Allow",
+                  "Action": "redshift-serverless:GetCredentials",
+                  "Resource": [
+                    "arn:aws:redshift-serverless:eu-central-1:825414820081:workgroup/d97481f0-e7c5-4970-93d9-5b371a5c6b42",
+                    "arn:aws:redshift-serverless:eu-central-1:825414820081:dbname/164b9a03-b081-4a62-adf1-7d1c7d58b988/analytics"
+                  ]
+                },
+                {
+                  "Sid": "DiscoverWorkgroup",
+                  "Effect": "Allow",
+                  "Action": [
+                    "redshift-serverless:GetWorkgroup"
+                  ],
+                  "Resource": [
+                    "arn:aws:redshift-serverless:eu-central-1:825414820081:workgroup/d97481f0-e7c5-4970-93d9-5b371a5c6b42"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "RedshiftDbRoles",
+            "Value": "tableau_analytics_reader"
+          },
+          {
+            "Key": "Component",
+            "Value": "tableau-database-read-only"
+          }
+        ]
+      }
+    },
+    "TableauSsmInstance": {
+      "Type": "AWS::EC2::Instance",
+      "DependsOn": [
+        "SsmInstanceProfile",
+        "RedshiftFromTableau"
+      ],
+      "Properties": {
+        "ImageId": {
+          "Ref": "AmazonLinuxArm64Ami"
+        },
+        "InstanceType": "t4g.micro",
+        "IamInstanceProfile": {
+          "Ref": "SsmInstanceProfile"
+        },
+        "NetworkInterfaces": [
+          {
+            "AssociatePublicIpAddress": true,
+            "DeleteOnTermination": true,
+            "DeviceIndex": "0",
+            "GroupSet": [
+              {
+                "Ref": "TableauAccessSecurityGroup"
+              }
+            ],
+            "SubnetId": "subnet-0cc2b1379071bdd1b"
+          }
+        ],
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "Encrypted": true,
+              "VolumeSize": 8,
+              "VolumeType": "gp3",
+              "DeleteOnTermination": true
+            }
+          }
+        ],
+        "MetadataOptions": {
+          "HttpTokens": "required",
+          "HttpEndpoint": "enabled",
+          "HttpPutResponseHopLimit": 1
+        },
+        "InstanceInitiatedShutdownBehavior": "stop",
+        "Monitoring": false,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "ecommerce-tableau-ssm-on-demand-demo"
+          },
+          {
+            "Key": "Component",
+            "Value": "tableau-ssm-on-demand"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "AccessInstanceId": {
+      "Value": {
+        "Ref": "TableauSsmInstance"
+      },
+      "Description": "Start temporarily for SSM; stop when finished"
+    },
+    "AccessSecurityGroupId": {
+      "Value": {
+        "Ref": "TableauAccessSecurityGroup"
+      }
+    },
+    "ReadOnlyIamRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "TableauDatabaseIAMRole",
+          "Arn"
+        ]
+      }
+    },
+    "RedshiftHost": {
+      "Value": "ecommerce-analytics-demo.825414820081.eu-central-1.redshift-serverless.amazonaws.com"
+    },
+    "RedshiftPort": {
+      "Value": "5439"
+    },
+    "Database": {
+      "Value": "analytics"
+    }
+  }
+}

@@ -27,7 +27,10 @@ try {
     if ($Account -ne $AccountId) { throw 'Incorrect AWS account' }
     $Branch = (& git branch --show-current | Out-String).Trim()
     Assert-Exit 'Git branch'
-    if ($Branch -ne 'feature/redshift-warehouse-dbt-churn') { throw "Unexpected branch: $Branch" }
+    if ($Branch -ne 'feature/dbt-analytics-churn-model') { throw "Unexpected branch: $Branch" }
+    $changes = @(& git status --porcelain)
+    Assert-Exit 'Git working tree'
+    if ($changes.Count -gt 0) { throw 'Commit or stash changes before publishing the immutable dbt image' }
     $Commit = (& git rev-parse --short=12 HEAD | Out-String).Trim()
     Assert-Exit 'Git commit'
     $Tag = "dbt-$Commit"
@@ -38,7 +41,7 @@ try {
     $Digest = (& aws ecr list-images --repository-name $Repository --filter tagStatus=TAGGED --query "imageIds[?imageTag=='$Tag'].imageDigest | [0]" --profile $Profile --region $Region --output text | Out-String).Trim()
     Assert-Exit 'Inspect existing ECR image'
     if (-not $Digest -or $Digest -eq 'None') {
-        & docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load --file (Join-Path $Root 'Dockerfile.phase6-dbt') --tag $ImageTag $Root | Out-Host
+        & docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load --file (Join-Path $Root 'docker/Dockerfile.phase6-dbt') --tag $ImageTag $Root | Out-Host
         Assert-Exit 'Build dbt image'
         $DockerConfig = Join-Path ([IO.Path]::GetTempPath()) ("dbt-ecr-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $DockerConfig | Out-Null

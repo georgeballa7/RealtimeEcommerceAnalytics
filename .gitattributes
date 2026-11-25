@@ -1,2 +1,6 @@
 # Preserve exact bytes of SHA-pinned Phase 5 manifest on Windows and Linux.
 config/catalog/phase5-gbp-sku-prices-v1.json text eol=lf
+
+# Deployment sources must have stable LF bytes across platforms.
+scripts/aws/phase6_nat_lifecycle_lambda.py text eol=lf
+scripts/glue/phase6_shopify_silver.py text eol=lf

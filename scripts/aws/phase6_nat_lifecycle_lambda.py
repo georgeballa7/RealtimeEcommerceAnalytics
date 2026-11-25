@@ -7,7 +7,7 @@ routes, RDS, Shopify schedules, or Terraform state.
 
 Invoked every five minutes via EventBridge Scheduler. Creates NAT in advance
 of the 08:00 and 16:00 Berlin generator windows. Releases NAT only after
-dependent workloads settle, including the 22:00 lifecycle ECS run.
+dependent workloads settle, including the 16:30 lifecycle ECS run.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from botocore.exceptions import ClientError
 TAG_VALUE = "phase6-dynamic-nat"
 BERLIN = ZoneInfo("Europe/Berlin")
 GLUE_ACTIVE = {"STARTING", "RUNNING", "STOPPING", "WAITING"}
-TERMINAL_PHASES = {"dispatched", "completed", "failed", "warehouse_failed"}
+TERMINAL_PHASES = {"completed"}
 LOCK_ID = "phase6-nat-lifecycle-lock"
 LEASE_SECONDS = 90
 QUIET_SECONDS = 20 * 60
@@ -48,21 +48,21 @@ def can_begin_new_warm(local: datetime, slot: str) -> bool:
     if slot == "morning":
         return 7 * 60 + 30 <= minute < 9 * 60
     if slot == "afternoon":
-        return 15 * 60 + 30 <= minute < 17 * 60
+        return 15 * 60 + 30 <= minute < 18 * 60
     return False
 
 
 def can_consider_release(local: datetime, slot: str) -> bool:
     minute = local.hour * 60 + local.minute
-    # The legacy standalone 18:00 task retains NAT only until a verified
-    # Terraform cutover disables that schedule. Completion/backlog guards
-    # must pass independently before actual NAT deletion.
+    # Completion, queue, dbt and ECS inactivity guards must pass before NAT
+    # deletion, independently of the earliest permitted release time.
     if slot == "morning":
         return minute >= 8 * 60 + 30
     if slot == "afternoon":
-        # 22:00 lifecycle and its webhooks must finish before NAT release.
-        # Past midnight still belongs to the preceding afternoon processing cycle.
-        return minute < 3 * 60 or minute >= 22 * 60 + 25
+        # 16:30 lifecycle and its webhooks must finish before NAT release.
+        # From 16:30, release immediately when lifecycle, warehouse, dbt and inactivity guards pass.
+        # Past midnight still belongs to the preceding afternoon cycle.
+        return minute < 3 * 60 or minute >= 16 * 60 + 30
     return True
 
 
@@ -73,6 +73,49 @@ def is_stale(local: datetime, slot: str) -> bool:
     if slot == "afternoon":
         return 3 * 60 <= minute < 7 * 60 + 30
     return True
+
+
+def generation_readiness_window(local: datetime) -> bool:
+    """Verify NAT routing ahead of all Shopify/outbound ECS execution windows.
+
+    A controller tick between 07:50-08:10, 15:50-16:10, and
+    16:20-16:40 must fail visibly if internet egress is not ready.
+    The failure triggers the CloudWatch Lambda Errors alarm.
+    """
+    minute = local.hour * 60 + local.minute
+    return any(
+        start <= minute < end
+        for start, end in (
+            (7 * 60 + 50, 8 * 60 + 10),
+            (15 * 60 + 50, 16 * 60 + 10),
+            (16 * 60 + 20, 16 * 60 + 40),
+        )
+    )
+
+
+def require_outbound_ready(local: datetime, ec2, route_tables, nat) -> None:
+    """Alert (via Lambda error metric) when the scheduled egress is not ready.
+
+    No resources are created here: provisioning/recovery remains owned by
+    the existing idempotent NAT and route lifecycle below.
+    """
+    if not generation_readiness_window(local):
+        return
+    if not nat or nat.get("State") != "available":
+        log("outbound_unready", reason="nat_not_available",
+            nat_state=nat.get("State") if nat else "absent")
+        raise RuntimeError("NAT is not available before outbound ECS schedule")
+    for table in verify_existing_route_tables(ec2, route_tables):
+        active = any(
+            route.get("DestinationCidrBlock") == "0.0.0.0/0"
+            and route.get("NatGatewayId") == nat["NatGatewayId"]
+            and route.get("State") == "active"
+            for route in table.get("Routes", [])
+        )
+        if not active:
+            log("outbound_unready", reason="app_route_not_active",
+                route_table=table["RouteTableId"], nat_id=nat["NatGatewayId"])
+            raise RuntimeError("NAT application default route is not active")
 
 
 def log(action: str, **details):
@@ -202,15 +245,30 @@ def create_managed_nat(ec2, settings, day, slot):
     return log("created", nat_id=nat["NatGatewayId"], slot=slot, state=nat["State"])
 
 
-def inactive_workloads(clients, settings, controller, local, slot):
+def slot_is_stale(local: datetime, day: str, slot: str) -> bool:
+    """Evaluate staleness against a slot's own day, across midnight."""
+    today = local.date().isoformat()
+    if day > today:
+        return False
+    if day < today:
+        return slot == "morning" or local.hour >= 3
+    return is_stale(local, slot)
+
+
+def inactive_workloads(clients, settings, controller, local, slot, *, day=None):
     """Fail closed: only delete NAT when ALL outbound-workload checks pass."""
-    if not can_consider_release(local, slot):
+    window_open = can_consider_release(local, slot)
+    # A previous day's morning can be released after midnight, once its own
+    # completion and all live workloads have been checked.
+    if day and day < local.date().isoformat() and slot == "morning":
+        window_open = True
+    if not window_open:
         return "scheduled_workload_window"
     if controller.get("worker_task_arn") or controller.get("error_hold"):
         return "projector_not_idle"
     last = [controller.get("last_event_at"), controller.get("last_work_at")]
     timestamps = [datetime.fromisoformat(x) for x in last if x]
-    if not timestamps and not is_stale(local, slot):
+    if not timestamps and not slot_is_stale(local, day or local.date().isoformat(), slot):
         return "no_confirmed_activity"
     if timestamps and (datetime.now(timezone.utc) - max(timestamps)).total_seconds() < QUIET_SECONDS:
         return "recent_projected_activity"
@@ -253,39 +311,74 @@ def active_slot_finished(table, day: str, slot: str, local: datetime):
     if status.get("day") == day and status.get("phase") in TERMINAL_PHASES:
         return True
     # Only a stale *idle* pipeline may be shut down after a missed/failed run.
-    # The calling path has already checked every active workload and backlog.
-    return is_stale(local, slot)
+    # Use the original slot date after midnight, not today's unrelated slot.
+    # The calling path checks every active workload and backlog independently.
+    return slot_is_stale(local, day, slot)
 
 
 def release_if_idle(ec2, clients, table, settings, nat, local):
-    day = local.date().isoformat()
-    nat_slot = next(
-        (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Slot"), None
-    )
+    tags = {tag["Key"]: tag["Value"] for tag in nat.get("Tags", [])}
+    nat_slot = tags.get("Slot")
+    nat_day = tags.get("Day")
     if nat_slot not in ("morning", "afternoon"):
         raise RuntimeError("On-demand NAT has unexpected slot tag")
-    # Morning may still be processing at the afternoon boundary. Never tear
-    # it down until its own record and the newer slot are settled.
-    slot_records = {
-        slot: load_record(table, day, slot)
-        for slot in ("morning", "afternoon")
-    }
-    relevant = [slot for slot, item in slot_records.items() if item and item["phase"] != "closed"]
+    try:
+        if not nat_day or datetime.fromisoformat(nat_day).date().isoformat() != nat_day:
+            raise ValueError("invalid day")
+    except ValueError as exc:
+        raise RuntimeError("On-demand NAT has unexpected Day tag") from exc
+    current_day = local.date().isoformat()
+    if nat_day > current_day:
+        raise RuntimeError("NAT Day tag is unexpectedly in the future")
+
+    # A single gateway can cover morning + afternoon and may stay alive after
+    # midnight. Always evaluate both the creation-day and today's open slots,
+    # never infer yesterday's completion state from today's empty records.
+    relevant = []
+    for day in sorted({nat_day, current_day}):
+        for slot in ("morning", "afternoon"):
+            item = load_record(table, day, slot)
+            if item and item.get("phase") != "closed":
+                relevant.append((day, slot))
     if not relevant:
-        relevant = [nat_slot]
+        relevant = [(nat_day, nat_slot)]
     controller = table.get_item(
         Key={"id": "phase5-controller"}, ConsistentRead=True
     ).get("Item", {})
-    for slot in relevant:
+    for day, slot in relevant:
         if not active_slot_finished(table, day, slot, local):
-            return log("awaiting_slot_completion", slot=slot, nat_id=nat["NatGatewayId"])
-        reason = inactive_workloads(clients, settings, controller, local, slot)
+            return log("awaiting_slot_completion", day=day, slot=slot,
+                       nat_id=nat["NatGatewayId"])
+        # After Redshift warehouse acknowledgement, retain NAT while the
+        # corresponding completion-triggered dbt build is pending/running.
+        # Even if the event notification is late, the DynamoDB marker is
+        # authoritative. A stale idle slot may release NAT to cap costs;
+        # active ECS tasks are independently checked immediately below.
+        coordinator_id = "phase6-morning" if slot == "morning" else "phase6-evening"
+        warehouse = table.get_item(
+            Key={"id": coordinator_id}, ConsistentRead=True
+        ).get("Item", {})
+        if (warehouse.get("day") == day
+                and warehouse.get("phase") == "completed"
+                and warehouse.get("warehouse_verified_at")):
+            dbt_slot = "morning" if slot == "morning" else "evening"
+            batch = warehouse.get("batch_id", "")
+            dbt = table.get_item(
+                Key={"id": f"phase7-dbt:{dbt_slot}:{batch}"}, ConsistentRead=True
+            ).get("Item", {})
+            if dbt.get("state") != "succeeded" and not slot_is_stale(local, day, slot):
+                return log("awaiting_verified_dbt_build", day=day, slot=slot,
+                           dbt_state=dbt.get("state", "not_started"),
+                           nat_id=nat["NatGatewayId"])
+        reason = inactive_workloads(clients, settings, controller, local, slot,
+                                    day=day)
         if reason:
-            return log("retained", reason=reason, slot=slot, nat_id=nat["NatGatewayId"])
+            return log("retained", reason=reason, day=day, slot=slot,
+                       nat_id=nat["NatGatewayId"])
     nat_id = nat["NatGatewayId"]
     remove_default_routes(ec2, settings["route_tables"], nat_id)
     ec2.delete_nat_gateway(NatGatewayId=nat_id)
-    for slot in relevant:
+    for day, slot in relevant:
         table.update_item(
             Key={"id": slot_key(day, slot)},
             UpdateExpression="SET #phase=:closed",
@@ -314,6 +407,9 @@ def acquire_lock(table, now: int, owner: str):
 
 def handler(event, context):
     event = event if isinstance(event, dict) else {}
+    # A staged controller must never create/delete NAT or routes when static NAT is live.
+    if os.environ.get("NAT_LIFECYCLE_ACTIVE", "false").lower() != "true":
+        return log("staged_disabled")
     settings = config()
     now = datetime.now(timezone.utc)
     local = now.astimezone(BERLIN)
@@ -335,22 +431,36 @@ def handler(event, context):
         }
         nat = managed_nat(ec2, settings["NAT_VPC_ID"])
         if nat and nat["State"] in ("deleting", "failed"):
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return log("nat_transition", nat_id=nat["NatGatewayId"], state=nat["State"])
         if nat and nat["State"] == "pending":
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return log("awaiting_nat", nat_id=nat["NatGatewayId"])
         if nat and nat["State"] == "available":
+            # A morning NAT may still be available when afternoon prewarming
+            # begins. Claim the afternoon record BEFORE considering deletion.
+            # Otherwise the controller can tear down the gateway at 15:30.
+            if slot and can_begin_new_warm(local, slot):
+                record_warm(table, today, slot)
             ensure_default_routes(ec2, settings["route_tables"], nat["NatGatewayId"])
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return release_if_idle(ec2, clients, table, settings, nat, local)
         if slot is None:
             return log("idle_no_nat")
         existing = load_record(table, today, slot)
         if existing and existing.get("phase") == "closed":
+            require_outbound_ready(local, ec2, settings["route_tables"], nat)
             return log("completed_no_nat", slot=slot)
         if not existing:
             if not can_begin_new_warm(local, slot):
+                require_outbound_ready(local, ec2, settings["route_tables"], nat)
                 return log("missed_prewarm_window", slot=slot)
             record_warm(table, today, slot)
-        return create_managed_nat(ec2, settings, today, slot)
+        response = create_managed_nat(ec2, settings, today, slot)
+        # An unready 07:50/15:50/16:20 preflight must page the operator,
+        # even when a recovery NAT create request has just been accepted.
+        require_outbound_ready(local, ec2, settings["route_tables"], nat)
+        return response
     finally:
         try:
             table.delete_item(

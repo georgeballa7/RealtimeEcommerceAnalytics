@@ -51,11 +51,11 @@ def test_nightly_writes_completion_only_after_both_generators():
     assert body["generation_slots"] == ["morning", "afternoon"]
 
 
-def test_terraform_scheduled_lifecycle_is_2200_berlin():
+def test_terraform_scheduled_lifecycle_is_1630_berlin():
     from pathlib import Path
     text = (Path(__file__).resolve().parents[2] /
             "infrastructure/terraform/phase5_scheduled_lifecycle.tf").read_text()
-    assert 'cron(0 22 * * ? *)' in text
-    assert 'cron(0 18 * * ? *)' not in text
+    assert 'cron(30 16 * * ? *)' in text
+    assert 'cron(0 22 * * ? *)' not in text
     assert '"--commit-nightly"' in text
     assert 'schedule_expression_timezone = "Europe/Berlin"' in text

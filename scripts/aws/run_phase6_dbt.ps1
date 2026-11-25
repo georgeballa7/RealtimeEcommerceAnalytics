@@ -9,6 +9,8 @@ application subnets and the new dbt task SG; no public IP.
 param(
     [ValidateSet('AuthCheck', 'Build')]
     [string]$Action = 'AuthCheck',
+    [ValidateSet('Core', 'All')]
+    [string]$Scope = 'Core',
     [switch]$Execute
 )
 Set-StrictMode -Version Latest
@@ -41,8 +43,18 @@ try {
     $SecurityGroup = TerraformOutput 'phase6_dbt_security_group_id'
     $SubnetsJson = & terraform output -json application_subnet_ids
     Assert-Exit 'Terraform application subnets'
-    $Subnets = @($SubnetsJson | ConvertFrom-Json)
-    if ($Subnets.Count -ne 2) { throw 'Expected two private application subnets' }
+    # Windows PowerShell may wrap JSON arrays passed through a pipeline.
+    # Convert directly, then enumerate its array elements explicitly.
+    $ParsedSubnets = ConvertFrom-Json -InputObject (($SubnetsJson | Out-String).Trim())
+    if ($ParsedSubnets -isnot [System.Array]) {
+        throw 'Expected application_subnet_ids to be a JSON array'
+    }
+    [string[]]$Subnets = @($ParsedSubnets | ForEach-Object { [string]$_ })
+    if ($Subnets.Count -ne 2 -or
+        @($Subnets | Select-Object -Unique).Count -ne 2 -or
+        @($Subnets | Where-Object { $_ -notmatch '^subnet-[0-9a-f]{8,}$' }).Count -gt 0) {
+        throw "Expected two distinct private subnet IDs; got $($Subnets.Count)"
+    }
     if ($TaskDef -notmatch ':task-definition/ecommerce-phase6-dbt-demo:[0-9]+$' -or
         $SecurityGroup -notmatch '^sg-[0-9a-f]+$') {
         throw 'Unexpected dbt task definition or task security group'
@@ -61,13 +73,18 @@ try {
             throw "Another dbt task is already $status"
         }
     }
-    $Command = if ($Action -eq 'Build') {
+    if ($Action -ne 'Build' -and $Scope -ne 'Core') {
+        throw 'Scope All requires -Action Build'
+    }
+    $Command = if ($Action -eq 'Build' -and $Scope -eq 'All') {
+        @('--action', 'build', '--select', '*')
+    } elseif ($Action -eq 'Build') {
         @('--action','build','--select','+fct_refund_lines','+fct_cancellations')
     } else {
         @('--action','auth-check')
     }
     Write-Host "dbt task: $TaskDef"
-    Write-Host "Action: $Action"
+    Write-Host "Action: $Action; Scope: $Scope"
     Write-Host "Private subnet count: $($Subnets.Count)"
     Write-Host "Task security group: $SecurityGroup"
     Write-Host 'Public IP: DISABLED'
@@ -98,11 +115,26 @@ try {
     }
     $Arn = $result.tasks[0].taskArn
     Write-Host "Started $Action dbt task: $Arn"
-    & aws ecs wait tasks-stopped --cluster $Cluster --tasks $Arn --profile $Profile --region $Region
-    Assert-Exit 'Wait for dbt task'
-    $stoppedJson = & aws ecs describe-tasks --cluster $Cluster --tasks $Arn --profile $Profile --region $Region --output json
-    Assert-Exit 'Inspect stopped dbt task'
-    $task = ($stoppedJson | Out-String | ConvertFrom-Json).tasks[0]
+    # ecs wait tasks-stopped has a comparatively short default waiter duration.
+    # Building all marts/tests may exceed it, particularly on a cold Redshift
+    # Serverless workgroup. Poll for at most 55 minutes, matching the Python
+    # dbt runner's 3300-second execution bound, then fail without relaunching.
+    $task = $null
+    for ($attempt = 0; $attempt -lt 165; $attempt++) {
+        $taskJson = & aws ecs describe-tasks --cluster $Cluster --tasks $Arn --profile $Profile --region $Region --output json
+        Assert-Exit 'Poll dbt ECS task status'
+        $rows = @(($taskJson | Out-String | ConvertFrom-Json).tasks)
+        if ($rows.Count -ne 1) { throw 'Expected exactly one ECS dbt task when polling' }
+        $task = $rows[0]
+        if ($task.lastStatus -eq 'STOPPED') { break }
+        if ($task.lastStatus -notin @('PROVISIONING','PENDING','ACTIVATING','RUNNING','DEACTIVATING','STOPPING')) {
+            throw "Unexpected dbt ECS task state: $($task.lastStatus)"
+        }
+        Start-Sleep -Seconds 20
+    }
+    if ($null -eq $task -or $task.lastStatus -ne 'STOPPED') {
+        throw "dbt ECS task has not stopped within 55 minutes: $Arn. Do not launch a duplicate task."
+    }
     $container = @($task.containers | Where-Object { $_.name -eq 'phase6-dbt' })
     if ($container.Count -ne 1 -or $null -eq $container[0].exitCode -or
         [int]$container[0].exitCode -ne 0) {

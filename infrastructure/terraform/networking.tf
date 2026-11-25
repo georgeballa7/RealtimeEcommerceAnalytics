@@ -1,19 +1,26 @@
-# Static is the current deployed behavior. Switch to on_demand only after
-# reviewing the NAT/route removals during the quiet window. Runtime NATs and
-# 0.0.0.0/0 application routes are then managed by the scheduled Lambda,
-# NOT by Terraform, to keep Terraform state consistent across daily cycles.
+# LIVE DEPLOYMENT (21 Nov 2026): on-demand NAT replaces the static NAT.
+# Terraform owns the reserved EIP, VPC, route tables, Lambda and schedule.
+# The Lambda exclusively creates/deletes ephemeral NAT gateways and application
+# 0.0.0.0/0 routes. Use static mode only for an explicitly planned rollback.
 variable "nat_gateway_mode" {
   type        = string
-  default     = "static"
-  description = "static = Terraform-managed NAT (existing); on_demand = Lambda creates/deletes NAT and app default routes when needed."
+  default     = "on_demand"
+  description = "static = explicit rollback with Terraform-managed NAT; on_demand = Lambda creates/deletes NAT and app default routes when needed."
   validation {
     condition     = contains(["static", "on_demand"], var.nat_gateway_mode)
     error_message = "nat_gateway_mode must be static or on_demand."
   }
 }
 
+variable "stage_nat_lifecycle" {
+  type = bool
+  default = false
+  description = "Stage the on-demand NAT controller with its schedule disabled while retaining the static NAT. Enable deliberately after plan review."
+}
+
 locals {
   static_nat_count = var.nat_gateway_mode == "static" ? var.nat_gateway_count : 0
+  nat_lifecycle_count = var.nat_gateway_mode == "on_demand" || var.stage_nat_lifecycle ? 1 : 0
 }
 
 data "aws_availability_zones" "available" { state = "available" }

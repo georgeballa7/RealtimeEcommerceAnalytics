@@ -97,9 +97,9 @@ try {
         if ($media -notin @('application/vnd.docker.distribution.manifest.v2+json','application/vnd.oci.image.manifest.v1+json')) { throw "Unsupported image type $media" }
         return [string]::Format('{0}/{1}@{2}', $registry,$repository,$digest)
     }
-    $newImage = Build-ReleaseImage 'ecommerce-phase5-live-lambda-demo' 'Dockerfile.phase5-lambda'
-    $newGeneratorImage = Build-ReleaseImage 'ecommerce-phase5-generator-demo' 'Dockerfile.phase5-generator'
-    $newLifecycleImage = Build-ReleaseImage 'ecommerce-phase5-lifecycle-demo' 'Dockerfile.phase5-lifecycle'
+    $newImage = Build-ReleaseImage 'ecommerce-phase5-live-lambda-demo' 'docker/Dockerfile.phase5-lambda'
+    $newGeneratorImage = Build-ReleaseImage 'ecommerce-phase5-generator-demo' 'docker/Dockerfile.phase5-generator'
+    $newLifecycleImage = Build-ReleaseImage 'ecommerce-phase5-lifecycle-demo' 'docker/Dockerfile.phase5-lifecycle'
     if ($newImage -isnot [string] -or $newGeneratorImage -isnot [string] -or $newLifecycleImage -isnot [string]) {
         throw 'Image helper returned non-scalar output; aborting before Terraform'
     }
