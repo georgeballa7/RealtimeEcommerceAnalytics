@@ -97,11 +97,11 @@ resource "aws_redshiftserverless_workgroup" "analytics" {
 
 variable "redshift_monthly_rpu_hour_limit" {
   type        = number
-  default     = 16
+  default     = 150
   description = "Maximum monthly compute RPU-hours before workgroup deactivation (not a total USD cap)."
   validation {
-    condition     = var.redshift_monthly_rpu_hour_limit >= 4 && var.redshift_monthly_rpu_hour_limit <= 32 && floor(var.redshift_monthly_rpu_hour_limit) == var.redshift_monthly_rpu_hour_limit
-    error_message = "Select an integer monthly limit between 4 and 32 RPU-hours."
+    condition     = var.redshift_monthly_rpu_hour_limit >= 4 && var.redshift_monthly_rpu_hour_limit <= 150 && floor(var.redshift_monthly_rpu_hour_limit) == var.redshift_monthly_rpu_hour_limit
+    error_message = "Select an integer monthly limit between 4 and 150 RPU-hours."
   }
 }
 
