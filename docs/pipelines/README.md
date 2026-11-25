@@ -1,4 +1,29 @@
-# From Shopify delivery to reporting slot
+# From a Shopify order to a trustworthy report
+
+**Start with the business story:** a simulated customer places an order in the Shopify development store. Shopify sends a webhook; the platform accepts it even when PostgreSQL is asleep, applies it safely when the database is ready, validates a complete processing batch, and builds reporting tables. A dashboard is considered current only when the downstream checks for that batch complete.
+
+### Five steps to follow
+
+1. **Capture the event:** verify its signature and put the delivery into a durable queue.
+2. **Apply the change:** archive the payload, deduplicate it, and update PostgreSQL using a database transaction.
+3. **Publish a batch:** wait until the scheduled source work is complete and quiet, then run Glue quality checks.
+4. **Build analytics:** load the accepted batch into Redshift and run dbt transformations and tests.
+5. **Verify the report:** match the source batch with the warehouse acknowledgement and dbt outcome; then check Tableau's date filters.
+
+**Important:** This is near-real-time *event capture*, not a claim that the warehouse refreshes instantly with every webhook. Operational events and analytical reporting advance on different schedules.
+
+### Terms used in the diagrams
+
+| Term | Meaning in this project |
+| --- | --- |
+| **Webhook** | An HTTP notification sent by Shopify when an order or refund changes. |
+| **Projection** | Applying an event's effect to the current operational tables in PostgreSQL. |
+| **Idempotency** | Replaying the same delivery without creating duplicate database effects. |
+| **Processing slot** | A scheduled morning or afternoon set of source work, identified by a date and batch marker. |
+| **Manifest** | A file describing the objects and checksums that make up one published batch. |
+| **Load ledger** | Warehouse record showing which manifest was committed, so retries cannot silently replace it with conflicting data. |
+| **Reconciliation** | Checking independently recorded states until the platform can confirm progress or identify a failure. |
+| **dbt mart** | A modeled reporting table or view with a stated business grain, such as one row per order or per customer. |
 
 ## End-to-end activity
 
