@@ -1,5 +1,20 @@
 # Architecture and decisions
 
+## The design in plain English
+
+There are **two systems working together**:
+
+- **Operational system:** receives Shopify notifications, holds them durably, and updates the authoritative order/refund records in PostgreSQL. It must handle duplicate and out-of-order deliveries.
+- **Analytical system:** extracts a verified processing batch, loads Redshift, and rebuilds consistent dbt reporting models. It must explain *which* data a report contains and whether that data passed validation.
+
+They are deliberately separated. A fast webhook acknowledgement is useful for Shopify, but it is **not proof of an updated sales report**.
+
+A second deliberate boundary is network cost: application tasks and the database run privately, while a controller creates outbound NAT networking only when required. This is a cost-conscious portfolio design with trade-offs in startup latency and cross-AZ dependency, not a claim of production high availability.
+
+**How to read the diagrams:** Start with the [system overview](diagrams/exports/overview.svg), then use the network diagram below to understand *where* workloads run. Follow the [pipeline walkthrough](../pipelines/README.md) for *when* data moves, and the [data models](../data-model/README.md) for *what* each stage stores.
+
+## Two clocks, one traceable batch
+
 The platform has two clocks. Shopify can deliver an event whenever an order changes. Analysts see the change after a processing slot completes, a validated snapshot reaches Redshift and dbt builds the marts. The webhook response therefore establishes acceptance into a durable queue. The warehouse ledger and dbt marker establish analytical freshness.
 
 ## Deployment and routing
