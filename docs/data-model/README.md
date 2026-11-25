@@ -4,7 +4,7 @@
 
 ## Analytical star schema
 
-There are ten accessible tables in `analytics_marts` and seven curated BI views. The [dbt definitions](../../analytics/dbt/models/marts) identify the ten tables as three dimensions, four event facts, daily sales and two customer churn feature marts. The diagram shows the seven dimensional tables. PK and FK labels here describe logical keys checked by dbt. 
+There are ten accessible tables in `analytics_marts` and seven curated BI views. The [dbt definitions](../../analytics/dbt/models/marts) identify the ten tables as three dimensions, four event facts, daily sales and two customer churn feature marts. The diagram shows seven tables in the dimensional model: three dimension tables and four fact tables. PK and FK labels here describe logical keys checked by dbt. 
 ```mermaid
 erDiagram
     DIM_DATE ||--o{ FCT_ORDERS : "order_date_key"
