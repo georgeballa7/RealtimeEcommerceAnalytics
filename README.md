@@ -39,7 +39,7 @@ The platform is designed around an important constraint: **the private applicati
 | What do the sales and retention results mean? | [Sales, retention and validation](docs/sales-retention-and-validation.md) |
 | Why these AWS services and network boundaries? | [Architecture and decisions](docs/architecture/README.md) |
 | How does a Shopify delivery reach a report? | [Pipeline walkthrough](docs/pipelines/README.md) |
-| Which warehouse tables connect, and how do I model them in Tableau? | [Star schema and Tableau relationships](docs/data-model/README.md#analytical-star-schema) |
+| Which warehouse tables share dimensions? | [Analytical star schema](docs/data-model/README.md#analytical-star-schema) |
 | How do I run the local checks, connect Tableau or investigate a failed slot? | [Operations and local setup](docs/operations/README.md) |
 
 For the historical workbook workflow, use the [historical ingestion commands](scripts/README.md). For infrastructure planning, use the [Terraform module instructions](infrastructure/terraform/README.md).

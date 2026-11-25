@@ -1,6 +1,6 @@
 # Data model
 
-[Analytical star schema](#analytical-star-schema) · [Building relationships in Tableau](#building-relationships-in-tableau) · [PostgreSQL](#operational-postgresql) · [Silver contract](#live-shopify-silver-contract)
+[Analytical star schema](#analytical-star-schema) · [PostgreSQL](#operational-postgresql) · [Silver contract](#live-shopify-silver-contract)
 
 ## Analytical star schema
 
@@ -108,24 +108,6 @@ The model also retains references between event rows. These are useful when look
 | Refund line | Original line | `line_key` when available. The SQL left join can leave `variant_key` empty. |
 
 PostgreSQL accepts a refund before its order arrives. The analytical contract is stricter: dbt tests require a matching order and customer on refund lines. Only the product relationship is optional there. See the [relationship tests](../../analytics/dbt/models/marts/_schema.yml) and [refund model](../../analytics/dbt/models/marts/fct_refund_lines.sql).
-
-## Building relationships in Tableau
-
-In the working workbook, choose **Data → New Data Source**, connect to the private Redshift database and select `analytics_marts`. Keep the existing dashboard source for existing sheets. A CSV, a serving view or one Custom SQL query appears as a single logical table. Hiding or unhiding sheets does not expose the tables that produced it.
-
-1. Start with one question, such as **which products contributed merchandise value each month?** Drag `fct_order_lines` onto the top-level logical canvas. Drag each of the following dimensions beside it and select the equality fields.
-
-   | Dimension | Dimension field | Order-line field |
-   | --- | --- | --- |
-   | `dim_date` | `date_key` | `order_date_key` |
-   | `dim_products` | `variant_key` | `variant_key` |
-   | `dim_customers` | `customer_key` | `customer_key` |
-
-2. Create a worksheet using the new source. Put month of `date_key` on Columns and `SUM(gross_line_gbp)` on Rows. Check the total against the same date/source slice of `fct_order_lines` before adding product detail. Double-clicking a logical table opens the physical join layer. Return to the top-level canvas to add a relationship.
-3. For order value alongside line value, Tableau 2024.2 and later supports another **base table**. Drag `fct_orders` into the **New Base Table** drop area and use the same date and customer dimensions as shared tables. Build the comparison with fields from those shared dimensions. Product detail applies to lines; an order header has no product key. Leave order-to-line drill-through off this canvas. On earlier versions, use separate single-fact sources or a serving view at the required grain.
-4. If a refund can lack a variant, retain **Some records match** for that relationship. Keep the default performance settings until uniqueness and coverage have been checked in the reporting slice.
-
-[Tableau data model](https://help.tableau.com/current/pro/desktop/en-us/datasource_datamodel.htm) · [Private Redshift connection](../operations/README.md#connect-tableau-to-private-redshift)
 
 ## Operational PostgreSQL
 
