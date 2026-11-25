@@ -93,7 +93,7 @@ From the project root on Windows, with the AWS CLI, Session Manager plugin, Reds
 .\scripts\tableau\start-tableau-tunnel.ps1
 ```
 
-In Tableau, choose Amazon Redshift: host `localhost`, port `15439`, database `analytics`, temporary credentials returned by the script, TLS enabled. Pick the schema containing the tables needed for the analysis; the same connection has read-only access to `analytics_bi`, `analytics_marts`, `analytics_ml`, `analytics_staging`, `silver_staging`, `analytics` and `public`.
+In Tableau, choose Amazon Redshift: host `localhost`, port `15439`, database `analytics`, temporary credentials returned by the script, TLS enabled. Pick the schema containing the tables needed for the analysis; the same connection has read-only access to `analytics_marts`, `analytics_ml`, `analytics_staging`, `silver_staging`, `analytics` and `public`.
 
 The Tableau database principal has a **24-hour idle session limit** and the regional SSM setting permits up to **60 minutes of idle tunneling**. Neither guarantees an indefinitely connected session. Temporary credentials expire for new authentication; an established session can remain usable. Reconnect if SSM closes the tunnel.
 

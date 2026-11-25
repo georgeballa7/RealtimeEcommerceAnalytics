@@ -14,6 +14,6 @@ Set-Clipboard -Value $auth.dbPassword
 Write-Host "Tableau username: $($auth.dbUser)"
 Write-Host "Temporary password copied to clipboard; paste into Tableau Password field."
 Write-Host "Expires at: $($auth.expiration)"
-Write-Host "Server: localhost | Port: 15439 | Database: analytics | Schema: analytics_bi"
+Write-Host "Server: localhost | Port: 15439 | Database: analytics"
 Write-Host "Clear the clipboard when finished."
 $auth.dbPassword=$null

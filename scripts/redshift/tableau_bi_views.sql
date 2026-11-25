@@ -2,8 +2,6 @@
 
 -- Existing role tableau_analytics_reader is provisioned separately.
 
-CREATE SCHEMA IF NOT EXISTS analytics_bi;
-
 CREATE SCHEMA IF NOT EXISTS analytics_ml;
 
 CREATE OR REPLACE VIEW analytics_ml.churn_features_v1 AS SELECT customer_key,as_of_date,churn_next_30d, CASE WHEN recency_days<=30 THEN '0-30d' WHEN recency_days<=60 THEN '31-60d' WHEN recency_days<=90 THEN '61-90d' ELSE '91+d' END AS recency_bin, CASE WHEN order_count_90d=0 THEN '0' WHEN order_count_90d<=2 THEN '1-2' WHEN order_count_90d<=5 THEN '3-5' ELSE '6+' END AS orders_bin, CASE WHEN spend_90d_gbp<=0 THEN '0' WHEN spend_90d_gbp<200 THEN '(0,200)' WHEN spend_90d_gbp<600 THEN '[200,600)' ELSE '600+' END AS spend_bin, CASE WHEN lifetime_order_count<=1 THEN '1' WHEN lifetime_order_count<=3 THEN '2-3' WHEN lifetime_order_count<=8 THEN '4-8' ELSE '9+' END AS lifetime_bin FROM analytics_marts.mart_customer_churn_training WITH NO SCHEMA BINDING;
@@ -41,42 +39,3 @@ FROM analytics_ml.churn_nb_predictions_v1 p
 JOIN analytics_marts.mart_customer_churn_scoring s
 ON s.customer_key=p.customer_key AND s.as_of_date=p.as_of_date
 WHERE p.cohort='current' WITH NO SCHEMA BINDING;
-
-CREATE OR REPLACE VIEW analytics_bi.v_churn_model_metrics AS
-SELECT examples AS holdout_records,positive_examples AS holdout_churn_events,
-tp AS true_positives,tn AS true_negatives,fp AS false_positives,fn AS false_negatives,
-accuracy,precision,recall,f1,roc_auc,majority_baseline_accuracy
-FROM analytics_ml.churn_nb_validation_metrics_v1;
-
-CREATE OR REPLACE VIEW analytics_bi.v_churn_risk_segments AS
-SELECT CASE segment WHEN 'Very low (<20%)' THEN 1 WHEN 'Low (20-40%)' THEN 2
-WHEN 'Medium (40-60%)' THEN 3 WHEN 'High (60-80%)' THEN 4 ELSE 5 END AS risk_order,
-segment AS risk_segment,customer_count,average_predicted_risk
-FROM analytics_ml.churn_nb_score_segments_v1;
-
-CREATE OR REPLACE VIEW analytics_bi.v_churn_monthly_labels AS
-SELECT CAST(as_of_date AS DATE) AS cohort_month,
-COUNT(*) AS records,SUM(churn_next_30d) AS churn_events,
-ROUND(100.0*SUM(churn_next_30d)::DECIMAL(18,5)/NULLIF(COUNT(*),0),2) AS observed_churn_pct
-FROM analytics_ml.churn_features_v1 GROUP BY 1;
-
-CREATE OR REPLACE VIEW analytics_bi.v_churn_model_calibration AS
-WITH ranked AS (
- SELECT churn_probability,actual_label,NTILE(10) OVER (ORDER BY churn_probability) AS decile
- FROM analytics_ml.churn_nb_predictions_v1 WHERE cohort='validation')
-SELECT decile,COUNT(*) AS records,
-ROUND(100.0*AVG(churn_probability),2) AS predicted_churn_pct,
-ROUND(100.0*SUM(actual_label)::DECIMAL(18,5)/NULLIF(COUNT(*),0),2) AS observed_churn_pct
-FROM ranked GROUP BY 1;
-
-CREATE OR REPLACE VIEW analytics_bi.v_churn_risk_by_recency AS SELECT * FROM analytics_ml.tableau_lb_v_churn_risk_by_recency;
-
-CREATE OR REPLACE VIEW analytics_bi.v_monthly_sales AS SELECT * FROM analytics_ml.tableau_lb_v_monthly_sales;
-
-CREATE OR REPLACE VIEW analytics_bi.v_customer_churn_scores AS SELECT * FROM analytics_ml.tableau_lb_v_customer_churn_scores;
-
-GRANT USAGE ON SCHEMA analytics_bi TO ROLE tableau_analytics_reader;
-
-GRANT SELECT ON ALL TABLES IN SCHEMA analytics_bi TO ROLE tableau_analytics_reader;
-
-GRANT SELECT FOR TABLES IN SCHEMA analytics_bi TO ROLE tableau_analytics_reader;

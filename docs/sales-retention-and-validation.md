@@ -8,13 +8,13 @@ The Tableau monthly sales view groups orders by the month of the original order 
 
 | Question | Dataset and grain | Interpretation |
 | --- | --- | --- |
-| How many orders were placed, and what are they worth now? | `analytics_bi.v_monthly_sales`, one row per month and source | Compare order count and current GBP value for the same source and month. |
+| How many orders were placed, and what are they worth now? | `analytics_ml.tableau_lb_v_monthly_sales`, one row per month and source | Compare order count and current GBP value for the same source and month. |
 | Which items drove volume? | `analytics_marts.fct_order_lines`, one row per order line | Sum quantities at line grain. Joining an order total onto three lines repeats that total three times. |
 | What was cancelled or refunded? | `fct_cancellations`, one simulated cancellation event. `fct_refund_lines`, one recorded Shopify refund line. | Report simulated cancellations and recorded refund subtotals separately. Subtracting them again from a current order value can double-count an adjustment. |
 
 ```sql
 SELECT sales_month, source_system, orders, net_sales_gbp
-FROM analytics_bi.v_monthly_sales
+FROM analytics_ml.tableau_lb_v_monthly_sales
 ORDER BY sales_month DESC, source_system;
 ```
 
@@ -50,16 +50,35 @@ The SQL fit estimates class priors and feature likelihoods from customer-months 
 Use a read-only session in the `analytics` database to reproduce the evaluation for the currently stored parameters. The first query measures holdout performance. The second compares predicted risk to observed outcomes. The third describes the scoring population at the latest available feature cutoff.
 
 ```sql
-SELECT * FROM analytics_bi.v_churn_model_metrics;
-SELECT * FROM analytics_bi.v_churn_model_calibration;
-SELECT * FROM analytics_ml.churn_nb_score_segments_v1;
+SELECT examples AS holdout_records, positive_examples AS holdout_churn_events,
+       tp AS true_positives, tn AS true_negatives, fp AS false_positives,
+       fn AS false_negatives, accuracy, precision, recall, f1, roc_auc,
+       majority_baseline_accuracy
+FROM analytics_ml.churn_nb_validation_metrics_v1;
+
+WITH ranked AS (
+    SELECT NTILE(10) OVER (ORDER BY churn_probability, customer_key, as_of_date) AS decile,
+           churn_probability, actual_label
+    FROM analytics_ml.churn_nb_predictions_v1
+    WHERE cohort = 'validation'
+)
+SELECT decile, COUNT(*) AS records,
+       ROUND(100.0 * AVG(churn_probability), 2) AS predicted_churn_pct,
+       ROUND(100.0 * AVG(actual_label::float), 2) AS observed_churn_pct
+FROM ranked
+GROUP BY decile
+ORDER BY decile;
+
+SELECT segment, customer_count, average_predicted_risk
+FROM analytics_ml.churn_nb_score_segments_v1
+ORDER BY average_predicted_risk DESC;
 ```
 
 The [training SQL](../scripts/redshift/train_churn_naive_bayes.sql) rebuilds `analytics_ml.churn_nb_priors_v1` and `analytics_ml.churn_nb_likelihoods_v1` and recreates dependent views. Run it only for an intended refit after validating the source marts. Training uses Redshift query compute. Record the evaluation date and population when comparing model versions.
 
 ## Explore in Tableau
 
-Start with `analytics_bi.v_monthly_sales` for sales, `v_churn_risk_segments` for the current distribution, and `v_churn_model_calibration` to compare predicted and observed risk on the holdout. The November 21 baseline recorded 4,417 scored customers. The current population changes as new orders reach the marts. For a dashboard comparison, match the reporting month and source and verify the refresh for the processing slot.
+The workbook reads monthly sales from `analytics_ml.tableau_lb_v_monthly_sales`. For the risk distribution it counts distinct customers by risk band at the latest scoring date in `analytics_ml.tableau_lb_v_customer_churn_scores`. For calibration it calculates deciles directly from validation predictions, using customer and cutoff date to break ties in probability. The November 21 baseline recorded 4,417 scored customers. The current population changes as new orders reach the marts. For a dashboard comparison, match the reporting month and source and verify the refresh for the processing slot.
 
 [Connect Tableau](operations/README.md#connect-tableau-to-private-redshift) · [Data grains and ERDs](data-model/README.md) · [Serving view definitions](../scripts/redshift/tableau_bi_views.sql)
 

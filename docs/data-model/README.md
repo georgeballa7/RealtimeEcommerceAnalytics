@@ -4,7 +4,8 @@
 
 ## Analytical star schema
 
-There are ten accessible tables in `analytics_marts` and seven curated BI views. The [dbt definitions](../../analytics/dbt/models/marts) identify the ten tables as three dimensions, four event facts, daily sales and two customer churn feature marts. The diagram shows seven tables in the dimensional model: three dimension tables and four fact tables. PK and FK labels here describe logical keys checked by dbt. 
+The analytical star schema in `analytics_marts` comprises three shared dimension tables and four fact tables. The dimensions describe dates, customers and products. The facts record orders, order lines, simulated cancellations and Shopify refund lines. Each fact has its own grain and relates to the dimensions applicable to that event. PK and FK labels identify logical keys checked by dbt.
+
 ```mermaid
 erDiagram
     DIM_DATE ||--o{ FCT_ORDERS : "order_date_key"
@@ -94,6 +95,15 @@ FROM information_schema.columns
 WHERE table_schema = 'analytics_marts'
 ORDER BY table_name, ordinal_position;
 ```
+
+### Fact grains
+
+| Dataset | Grain | Meaning |
+| --- | --- | --- |
+| fct_orders | Source-qualified order | Count orders here. Gross and current GBP values describe the order state. |
+| fct_order_lines | Source-qualified order line | Quantity and gross line value support product analysis. Joining back to orders repeats the header amount per line. |
+| fct_cancellations | Simulated cancellation event | Cancelled merchandise is a synthetic outcome. |
+| fct_refund_lines | Shopify refund line | Recorded line subtotal is evidence of a refund record. Cash settlement requires additional evidence. |
 
 ### Order and line drill-through
 
@@ -235,7 +245,7 @@ erDiagram
     }
 ```
 
-Within database `analytics`, `silver_staging` holds loaded sources. `analytics_staging` holds dbt views, `analytics_marts` holds the dimensional and feature tables, `analytics_ml` serves model parameters and predictions, and `analytics_bi` exposes reporting views.
+Within database `analytics`, `silver_staging` holds loaded sources. `analytics_staging` holds dbt views, `analytics_marts` holds the dimensional and feature tables, `analytics_ml` holds model parameters, predictions and reporting views.
 
 The two staging views normalize historical and Shopify order rows. The Shopify view checks the verified customer mapping and filters GBP. The facts use source-qualified order and line keys. The analytical core comprises three dimensions and four facts in the marts schema. The branch defines no separate physical core schema. See the [landing DDL](../../analytics/redshift/silver_staging_schema.sql), [staging views](../../analytics/dbt/models/staging) and [analytical star schema](#analytical-star-schema).
 
@@ -253,17 +263,11 @@ Glue publishes each live table under the same name used by Redshift in `silver_s
 
 Keep UTC timestamps, exact decimal money, bounded text lengths and source-specific composite keys. Quarantine invalid identifiers and unresolved customer mappings. Preserve Shopify variant identity until a verified canonical mapping is available. The [staging DDL](../../analytics/redshift/silver_staging_schema.sql) defines the full column order.
 
-## Reading the marts
+## Sales aggregation
 
-| Dataset | Grain | Meaning |
-| --- | --- | --- |
-| fct_orders | Source-qualified order | Count orders here. Gross and current GBP values describe the order state. |
-| fct_order_lines | Source-qualified order line | Quantity and gross line value support product analysis. Joining back to orders repeats the header amount per line. |
-| fct_cancellations | Simulated cancellation event | Cancelled merchandise is a synthetic outcome. |
-| fct_refund_lines | Shopify refund line | Recorded line subtotal is evidence of a refund record. Cash settlement requires additional evidence. |
-| mart_daily_sales | Order date, source system, synthetic flag | Aggregates gross/current order values and order count. Simulated cancellations join by cancellation date to synthetic rows. Dates without a matching order group do not appear through that join. |
+`analytics_marts.mart_daily_sales` groups orders by order date, source system and synthetic flag. It sums order counts and gross and current GBP values. Simulated cancellations join by cancellation date to synthetic order groups, so a cancellation date with no matching order group contributes no row.
 
-## Customer-month features and parameter tables
+## Customer-month features
 
 The two feature marts and the SQL parameter tables have different grains. See [Sales and retention](../sales-retention-and-validation.md) for the target, cutoff and evaluation.
 
@@ -298,3 +302,20 @@ erDiagram
 These are logical grains. Training is unique by customer and as-of date. Current scoring yields one row per eligible customer. The likelihood table has one row per class, feature and bin. The prediction view evaluates both candidate classes and emits customer, as-of date, cohort, probability and predicted label. Validation rows have observed labels. Current rows have none.
 
 [Fact and mart SQL](../../analytics/dbt/models/marts) · [Model fit and scoring SQL](../../scripts/redshift/train_churn_naive_bayes.sql) · [Evaluation and limitations](../sales-retention-and-validation.md#reproduce-the-evaluation)
+
+
+## Reporting views
+
+Redshift exposes the reporting objects below in `analytics_ml`. The working Tableau workbook connects directly to the seven fact and dimension tables through one data source. Its second data source uses Custom SQL. The catalog and workbook were checked on November 25, 2026.
+
+| View in `analytics_ml` | Grain or filter | Use in the workbook SQL |
+| --- | --- | --- |
+| `tableau_lb_v_monthly_sales` | Month of order and source system | Sales, growth and reconciliation with daily and order-level totals |
+| `tableau_lb_v_customer_churn_scores` | Current prediction joined to features by customer and cutoff date | Latest-cutoff risk distribution and customer shortlist |
+| `churn_nb_predictions_v1` | Customer, cutoff and cohort | Calibration deciles derived from the validation cohort |
+| `churn_nb_validation_metrics_v1` | One aggregate over validation predictions | Model precision, recall and ROC-AUC |
+| `tableau_lb_v_churn_risk_by_recency` | Recency band among current predictions | Available for SQL analysis |
+| `churn_nb_score_segments_v1` | Risk segment among current predictions | Available for SQL analysis |
+| `churn_features_v1` | Labeled customer-month with binned features | Upstream input to scoring and evaluation |
+
+[Reporting examples and metric definitions](../sales-retention-and-validation.md) · [View definitions](../../scripts/redshift/tableau_bi_views.sql)

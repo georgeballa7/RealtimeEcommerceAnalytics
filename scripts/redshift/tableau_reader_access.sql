@@ -1,6 +1,5 @@
 -- Redshift Tableau reader access. Requires the existing tableau_analytics_reader role.
 GRANT USAGE ON SCHEMA analytics TO ROLE tableau_analytics_reader;
-GRANT USAGE ON SCHEMA analytics_bi TO ROLE tableau_analytics_reader;
 GRANT USAGE ON SCHEMA analytics_marts TO ROLE tableau_analytics_reader;
 GRANT USAGE ON SCHEMA analytics_ml TO ROLE tableau_analytics_reader;
 GRANT USAGE ON SCHEMA analytics_staging TO ROLE tableau_analytics_reader;
@@ -8,7 +7,6 @@ GRANT USAGE ON SCHEMA silver_staging TO ROLE tableau_analytics_reader;
 GRANT USAGE ON SCHEMA public TO ROLE tableau_analytics_reader;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO ROLE tableau_analytics_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA analytics_bi TO ROLE tableau_analytics_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA analytics_marts TO ROLE tableau_analytics_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA analytics_ml TO ROLE tableau_analytics_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA analytics_staging TO ROLE tableau_analytics_reader;
@@ -16,7 +14,6 @@ GRANT SELECT ON ALL TABLES IN SCHEMA silver_staging TO ROLE tableau_analytics_re
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ROLE tableau_analytics_reader;
 
 GRANT SELECT FOR TABLES IN SCHEMA analytics TO ROLE tableau_analytics_reader;
-GRANT SELECT FOR TABLES IN SCHEMA analytics_bi TO ROLE tableau_analytics_reader;
 GRANT SELECT FOR TABLES IN SCHEMA analytics_marts TO ROLE tableau_analytics_reader;
 GRANT SELECT FOR TABLES IN SCHEMA analytics_ml TO ROLE tableau_analytics_reader;
 GRANT SELECT FOR TABLES IN SCHEMA analytics_staging TO ROLE tableau_analytics_reader;
