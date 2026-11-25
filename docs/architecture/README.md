@@ -1,7 +1,5 @@
 # Architecture and decisions
 
-## The design in plain English
-
 There are **two systems working together**:
 
 - **Operational system:** receives Shopify notifications, holds them durably, and updates the authoritative order/refund records in PostgreSQL. It must handle duplicate and out-of-order deliveries.
@@ -43,9 +41,6 @@ API Gateway, queues, DynamoDB, S3 and the orchestration services are regional se
 ## Ownership and evidence
 
 Terraform owns the network foundation, operational service resources, Glue, Redshift and the NAT controller. The controller owns the ephemeral gateway and its application default routes. CloudFormation owns the coordinator, Silver loader, dbt orchestrator and Tableau access stacks and their child resources. The branch retains declarations for selected IAM, eventing, log and SSM imports. Declarations alone do not establish state ownership. Review the state before proposing adoption.
-
-On November 24, the engineering record confirmed retirement of the legacy API/consumer/Spark/exporter repositories and associated legacy resources. The active projector security group and Glue connection are still needed. The record also found equivalent Glue program text after newline normalization and equivalent NAT controller logic despite a trailing comment in the deployed package. Historical deployment scripts and inbox/outbox migrations remain useful for reconstruction. The active ingress entry point is the Lambda-backed FastAPI handler.
-
 The November 23 audit recorded a coordinator schedule that differed from its stored stack template. Verify the live schedule, Lambda package and stack before redeployment. The November 24 retirement record concerns infrastructure ownership, independently of that runtime check.
 
 [Network definitions](../../infrastructure/terraform/networking.tf) · [NAT controller](../../scripts/aws/phase6_nat_lifecycle_lambda.py) · [Stack templates](../../infrastructure/cloudformation) · [Diagram sources and rendering](diagrams/README.md)
