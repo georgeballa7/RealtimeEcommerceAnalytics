@@ -18,3 +18,12 @@ The branch already had a Silver contract, dimensional model, marts ERD, classifi
 | Operational examples | AWS CLI operations and query fields reviewed against the implementation. Local development commands exercised. Live warehouse queries, deployment commands and teardown were not executed. |
 
 The recorded November 21 warehouse and model results describe a dated checkpoint. The later infrastructure retirement verifies resource ownership and cleanup. To establish a particular day's processing result, follow the slot-specific checks in the [operations guide](operations/README.md).
+
+## Audience-readability revision — 25 November 2026
+
+The original documentation generation focused on architectural coverage and diagram rendering. A subsequent editorial pass improved the experience for two readers:
+
+- **Hiring manager / reviewer:** The root README now starts with the business problem, result, engineering decisions, limitations, and an explicit path to technical depth. It does not present synthetic data or historical checkpoints as live commercial results.
+- **Developer / maintainer:** The README and operations guide now offer a local-first test path, relevant entry points, a change-to-test map, and a clear boundary between read-only checks and AWS/Shopify mutations. The pipeline and architecture guides introduce plain-language workflows and key terms before detailed implementation.
+
+The changes are restricted to Markdown; **no diagrams, application code, Terraform or AWS resources were changed in this editorial pass**. Existing diagram-rendering and unit-test results above are historical validation for the preceding documentation baseline, not newly executed tests for this revision. GitHub CI and rendered link inspection should still be checked at final PR review.
