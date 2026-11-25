@@ -108,6 +108,34 @@ The model also retains references between event rows. These are useful when look
 
 PostgreSQL accepts a refund before its order arrives. The analytical contract is stricter: dbt tests require a matching order and customer on refund lines. Only the product relationship is optional there. See the [relationship tests](../../analytics/dbt/models/marts/_schema.yml) and [refund model](../../analytics/dbt/models/marts/fct_refund_lines.sql).
 
+## Historical Silver contract
+
+Online Retail II supplies the customer and catalog identities used by the synthetic backfill and Shopify simulation. Historical Silver is a versioned set of Parquet datasets. The [live Shopify Silver contract](#live-shopify-silver-contract) covers a different input: operational records extracted from PostgreSQL.
+
+### From a workbook row to a canonical entity
+
+Bronze keeps the original workbook, its checksum, and the worksheet name and row position for each source record. The source invoice timestamp has no timezone and the workbook has no explicit currency. Historical Silver preserves those limits. Generated UTC event times and simulated GBP prices belong to the backfill.
+
+| Historical dataset | Grain and key | Source identity retained |
+| --- | --- | --- |
+| `customers` | One identifiable customer per `customer_id` | Normalize the original customer ID to an integer-like string, such as `17850`. Preserve the source system, first-seen timestamp and historical origin. |
+| `products` | One stock code per `product_id` | Keep the source stock code, description and item classification. |
+| `product_variants` | One canonical variant per `variant_id` | The historical variant derives from the stock code, carries its parent product ID and uses the stock code as its SKU. |
+| `orders` | One invoice per `order_id` | Keep the original invoice identifier, including cancellation identifiers. The transform rejects invoices assigned to multiple customers. |
+| `order_items` | One retained source row per `order_item_id` | The worksheet and row position identify the line. Two genuine lines on the same invoice can have identical contents and still have distinct keys. |
+
+The platform uses UUIDv5 with a fixed project namespace, entity type, source system and source key. Reprocessing the same input yields the same ID. A Shopify GraphQL ID identifies a particular Shopify object. The historical transform leaves Shopify IDs empty. Synchronization records the IDs returned by Shopify and verifies customer, product and variant mappings within the shop. A Shopify-bound order requires the verified **variant** for each item. The full historical synchronization population is 5,942 identifiable customers for the reference workbook.
+
+### Reconciliation and provenance
+
+Every Bronze row falls into exactly one count: a removed cross-sheet copy, a quarantined row missing its customer ID, or a retained customer-linked line. The transform publishes `cross_sheet_duplicates` and `quarantine` so the first two counts remain auditable. It also publishes `returns_adjustments` as a subset of retained lines. Adding this subset to the reconciliation total would count those lines twice.
+
+Historical prices and signed line amounts use decimal arithmetic. Before publication, the transform checks order and line key uniqueness, verifies the order and customer references, and reconciles the source population. The Silver manifest is written last and links the output files to the verified Bronze input.
+
+The deterministic backfill uses Silver-derived profiles over an explicit UTC interval with an inclusive start and exclusive end. Batch and event identifiers trace generated records back to a run. An order generated in the development store keeps its synthetic provenance when delivered through a genuine Shopify webhook.
+
+[Historical transformation](../../src/ecommerce/pipelines/silver/historical.py) · [Canonical ID definitions](../../src/ecommerce/domain/identifiers.py) · [Synthetic backfill](../../src/ecommerce/application/use_cases/synthetic_backfill.py)
+
 ## Operational PostgreSQL
 
 Migrations 001–008 define identities, sync attempts and leases, catalog and price verification, webhook bookkeeping and operational projections. In this diagram repeated PK attributes form one composite key. Solid relationships represent declared foreign keys. The refund header's order ID is a reconciliation reference. Its corresponding order can arrive later.

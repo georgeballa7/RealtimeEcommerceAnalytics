@@ -55,7 +55,7 @@ flowchart TD
 
 All slot times use Europe/Berlin. EventBridge Scheduler starts the generator at 08:00 and 16:00. It uses approved customer and catalog identities and verified GBP prices to create controlled transactions in the development store. The slot runner writes the completion marker only after successful generation. The 16:30 lifecycle task handles simulated cancellations and refunds and publishes a settled marker for the day. If a remote write is ambiguous, inspect its operation journal and read back the Shopify result before repeating a write.
 
-The historical identity foundation reconciled 5,942 customers with Shopify and the catalog approval manifest included 3,408 eligible stock codes. Operation journals, leases and Shopify read-back protect identity creation during retries. The [historical Silver contract](../../data/schemas/canonical-silver-v1.md) defines the input data.
+The catalog approval manifest included 3,408 eligible stock codes. Operation journals, leases and Shopify read-back protect identity creation during retries. The [historical Silver contract](../data-model/README.md#historical-silver-contract) defines the input data.
 
 Historical calibration and deterministic backfill are separate inputs. The historical synthetic orders, order items and cancellations enter Silver staging through their historical load path. A live webhook has its own shop, topic, delivery ID and payload. Keep source provenance through aggregation.
 
