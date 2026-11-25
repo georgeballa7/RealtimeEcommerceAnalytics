@@ -101,6 +101,20 @@ erDiagram
 
 The two staging views normalize historical and Shopify order rows. The Shopify view checks the verified customer mapping and filters GBP. The facts use source-qualified order and line keys. The analytical core comprises three dimensions and four facts in the marts schema. The branch defines no separate physical core schema. See the [landing DDL](../../analytics/redshift/silver_staging_schema.sql), [staging views](../../analytics/dbt/models/staging) and [analytical marts ERD](../../analytics/dbt/STAR_SCHEMA_ERD.md).
 
+### Live Shopify Silver contract
+
+Glue publishes each live table under the same name used by Redshift in `silver_staging`. Match the column order and warehouse types before changing extraction or COPY.
+
+| Spark Silver table | Redshift silver_staging target | Columns | Matching data types |
+| --- | --- | ---: | --- |
+| shopify_live_order | shopify_live_order | 13 | string/VARCHAR, long/BIGINT, timestamp/TIMESTAMPTZ, DECIMAL(18,2), boolean |
+| shopify_live_order_line | shopify_live_order_line | 9 | string/VARCHAR, long/BIGINT, int/INT, DECIMAL(18,2), timestamp |
+| shopify_live_refund | shopify_live_refund | 6 | string/VARCHAR, long/BIGINT, DECIMAL(18,2), timestamp |
+| shopify_live_refund_line | shopify_live_refund_line | 6 | string/VARCHAR, long/BIGINT, int/INT, DECIMAL(18,2) |
+| shopify_customer_identity | shopify_customer_identity | 7 | string/VARCHAR, timestamp |
+
+Keep UTC timestamps, exact decimal money, bounded text lengths and source-specific composite keys. Quarantine invalid identifiers and unresolved customer mappings. Preserve Shopify variant identity until a verified canonical mapping is available. The [staging DDL](../../analytics/redshift/silver_staging_schema.sql) defines the full column order.
+
 ## Reading the marts
 
 | Dataset | Grain | Meaning |
@@ -145,4 +159,4 @@ erDiagram
 
 These are logical grains. Training is unique by customer and as-of date. Current scoring yields one row per eligible customer. The likelihood table has one row per class, feature and bin. The prediction view evaluates both candidate classes and emits customer, as-of date, cohort, probability and predicted label. Validation rows have observed labels. Current rows have none. The September–October temporal holdout recorded ROC-AUC 0.6398. Calibration and provenance limit how the scores can be interpreted.
 
-[Fact and mart SQL](../../analytics/dbt/models/marts) · [Model fit and scoring SQL](../../scripts/redshift/train_churn_naive_bayes.sql) · [Evaluation and limitations](../churn_sql_model_v1.md)
+[Fact and mart SQL](../../analytics/dbt/models/marts) · [Model fit and scoring SQL](../../scripts/redshift/train_churn_naive_bayes.sql) · [Evaluation and limitations](../sales-retention-and-validation.md#reproduce-the-evaluation)

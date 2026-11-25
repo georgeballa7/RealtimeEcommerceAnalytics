@@ -96,7 +96,9 @@ The coordinator polls readiness. The morning slot requires its generation marker
 
 Glue reads operational tables over JDBC, writes batch-specific Bronze Parquet, applies schema, identity, monetary and parent-child checks, accounts for rejected records, and publishes Silver gzip JSON Lines plus the completion manifest. Failed quality checks or a missing manifest block publication downstream. Consult the source-to-target contract for the five tables and their column types.
 
-[Coordinator](../../scripts/aws/phase6_evening_coordinator.py) · [Glue job](../../scripts/glue/phase6_shopify_silver.py) · [Silver contract](../phase6_shopify_silver_contract.md)
+[Coordinator](../../scripts/aws/phase6_evening_coordinator.py) · [Glue job](../../scripts/glue/phase6_shopify_silver.py) · [Silver contract](../data-model/README.md#live-shopify-silver-contract)
+
+The live Glue job carries forward the historical validation rules for identity, exact money and row reconciliation. Worksheet-overlap deduplication belongs to the Online Retail II import. The live extraction uses one JDBC reader per table to limit pressure on RDS. A workload that permits concurrent writes during extraction would need a consistent source snapshot or a coordinated change-data-capture boundary.
 
 ## Warehouse load and dbt
 
@@ -112,4 +114,4 @@ The dbt orchestrator reconciles acknowledged slots when event rules fire. It che
 
 The dbt build refreshes labeled monthly training examples and an unlabeled current feature set. A separate Redshift SQL script fits priors and conditional likelihoods. Prediction and evaluation views combine those parameters with the features at query time. An automatic classifier refit after each build is unverified. Tableau Desktop connects through an SSM port-forwarding session and queries the chosen serving views. Check the workbook's reporting month and whether it uses a live connection or an extract when comparing successive runs.
 
-[Churn evaluation](../churn_sql_model_v1.md) · [BI views](../../scripts/redshift/tableau_bi_views.sql) · [Tableau access](../tableau_redshift_connectivity.md)
+[Sales and retention measures](../sales-retention-and-validation.md) · [BI views](../../scripts/redshift/tableau_bi_views.sql) · [Tableau access](../operations/README.md#connect-tableau-to-private-redshift)

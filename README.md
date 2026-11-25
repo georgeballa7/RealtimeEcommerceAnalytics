@@ -32,17 +32,17 @@ The platform is designed around an important constraint: **the private applicati
 
 **Example business question:** *Did yesterday's simulated orders reach the dashboard?* The answer is not merely “the webhook returned success.” The platform checks the source processing marker, event ledger, validated snapshot manifest, Redshift load acknowledgement, and dbt task outcome. [Follow that evidence path](docs/operations/README.md).
 
-## Choose your route
+## Explore the project
 
-### I am reviewing this project
+### Business questions and system design
 
-Start with the [architecture guide](docs/architecture/README.md) and [pipeline walkthrough](docs/pipelines/README.md). They explain the design decisions, processing guarantees, networking, and what happens when a service fails.
+Start with [sales and customer retention](docs/sales-retention-and-validation.md) for the reporting outcomes, then follow the [architecture guide](docs/architecture/README.md) and [pipeline walkthrough](docs/pipelines/README.md). They explain the design decisions, processing guarantees, networking, and what happens when a service fails.
 
 Then visit [data modeling and lineage](docs/data-model/README.md) for the operational ERDs, analytical fact/dimension tables, and churn model. The churn analysis includes limitations: its score estimates a defined inactivity outcome on synthetic/historical data; it is not a validated commercial prediction product.
 
-### I want to run or extend the code
+### Run or extend the code
 
-Start with [the developer path in the operations guide](docs/operations/README.md#developer-start-here), which separates **safe local checks** from **AWS-changing operations**.
+Start with [local setup in the operations guide](docs/operations/README.md#local-setup), which separates **safe local checks** from **AWS-changing operations**.
 
 Useful entry points:
 
@@ -50,7 +50,7 @@ Useful entry points:
 | --- | --- |
 | Follow an event end to end | [Pipeline walkthrough](docs/pipelines/README.md) |
 | Find the webhook handler and projection code | [Capture and projection](docs/pipelines/README.md#capture-and-projection) |
-| Understand schemas and data quality | [Data models](docs/data-model/README.md) and [Silver contract](docs/phase6_shopify_silver_contract.md) |
+| Understand schemas and data quality | [Data models](docs/data-model/README.md) and [Silver contract](docs/data-model/README.md#live-shopify-silver-contract) |
 | Work with dbt models and SQL | [dbt models](analytics/dbt/models) and [Redshift SQL](analytics/redshift) |
 | Inspect Terraform and AWS ownership | [Infrastructure reference](infrastructure/terraform/README.md) and [architecture decisions](docs/architecture/README.md) |
 | Investigate a pipeline failure | [Operations and recovery](docs/operations/README.md#failure-diagnosis) |
@@ -85,7 +85,5 @@ To verify a new processing day, use the [read-only slot verification checklist](
 - [Pipelines and recovery boundaries](docs/pipelines/README.md) — generation, webhook capture, projection, Glue, Redshift, dbt and churn.
 - [Database models and ERDs](docs/data-model/README.md) — tables, keys, grains and data lineage.
 - [Operations and developer setup](docs/operations/README.md) — how to inspect, test, troubleshoot and deploy safely.
-- [Tableau connectivity](docs/tableau_redshift_connectivity.md) — private reporting access.
-- [Churn model analysis](docs/churn_sql_model_v1.md) — methodology, evaluation and limitations.
+- [Sales and customer retention](docs/sales-retention-and-validation.md) — sales definitions, refresh evidence, churn evaluation and Tableau views.
 - [Architecture diagrams and editable sources](docs/architecture/diagrams/README.md) — overview, network, ingestion, warehouse and NAT.
-- [Documentation validation and evidence](docs/validation.md) — what was checked, and what was not.

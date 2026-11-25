@@ -1,6 +1,6 @@
 # Operating the Frankfurt deployment
 
-## Developer: start here
+## Local setup
 
 This repository contains **runnable local checks** and **AWS-connected operational workflows**. You do not need an AWS account, a Shopify store, or a running database to start reading the code and running the unit tests. Do not treat the commands used for a live deployment as a local quick-start.
 
@@ -30,10 +30,10 @@ On macOS/Linux, use `source .venv/bin/activate`. **Do not run integration or end
 | Change webhook validation or queue handling | `src/ecommerce/interfaces/http/`, `src/ecommerce/interfaces/workers/` | Python unit tests; relevant integration fixtures |
 | Change synthetic order generation or schedules | `scripts/`, `infrastructure/terraform/`, `infrastructure/cloudformation/` | Idempotency tests; scheduled-job and operation-journal review |
 | Change operational database constraints | `infrastructure/sql/` | Migration review, projector tests and rollback plan |
-| Change Silver extraction or quality rules | `scripts/glue/`, `docs/phase6_shopify_silver_contract.md` | Schema/contract tests; batch-manifest checks |
+| Change Silver extraction or quality rules | `scripts/glue/`, [Silver contract](../data-model/README.md#live-shopify-silver-contract) | Schema/contract tests; batch-manifest checks |
 | Add analytics metrics or marts | `analytics/dbt/models/`, `analytics/dbt/tests/` | dbt parsing and data tests in a suitably configured environment |
 | Change private networking or the NAT controller | `infrastructure/terraform/`, `scripts/aws/` | Terraform validation, NAT unit tests, reviewed **state-aware plan** |
-| Change Tableau access | `infrastructure/cloudformation/`, `docs/tableau_redshift_connectivity.md` | Stack ownership review and read-only connection checks |
+| Change Tableau access | `infrastructure/cloudformation/`, [connection steps](#connect-tableau-to-private-redshift) | Stack ownership review and read-only connection checks |
 
 **Read-only versus mutating:** Listing AWS resources, reading status, and running unit tests are normally observation tasks. Creating Shopify orders, running backfills, applying Terraform plans, deploying CloudFormation stacks, refitting model parameters, or starting paid AWS compute are not. Use a development environment and explicit approval for changes that affect shared resources.
 
@@ -80,7 +80,32 @@ Container Dockerfiles under [docker](../../docker) use the repository root as bu
 
 [GitHub Actions](../../.github/workflows) runs Python lint, compilation and unit tests. Path-filtered checks cover PowerShell tooling, Glue contracts/Spark, Terraform offline validation and dbt parse. Passing CI establishes source-level checks. It does not deploy a stack or verify a processing slot.
 
-**State-changing operations.** Publishing an image, registering a task, applying a saved plan, updating a stack, refitting the churn SQL model, replaying events and starting the Tableau tunnel can change remote state or incur compute charges. The Tableau helper can start the access EC2 instance. Use the [Tableau guide](../tableau_redshift_connectivity.md) to close the session when finished. Migrations and Shopify identity backfills have their own ledgers and are separate from routine reporting.
+**State-changing operations.** Publishing an image, registering a task, applying a saved plan, updating a stack, refitting the churn SQL model, replaying events and starting the Tableau tunnel can change remote state or incur compute charges. The Tableau helper can start the access EC2 instance. Use the [Tableau guide](#connect-tableau-to-private-redshift) to close the session when finished. Migrations and Shopify identity backfills have their own ledgers and are separate from routine reporting.
+
+## Connect Tableau to private Redshift
+
+Tableau Desktop uses a read-only Redshift identity through a Systems Manager tunnel. The workgroup is private. The CloudFormation template requests public IPv4 on the EC2 access host, which initiates the SSM connection. Its security group has no inbound SSH or RDP rule.
+
+From the project root on Windows, with the AWS CLI, Session Manager plugin, Redshift connector/driver and configured AWS profile:
+
+```powershell
+.\scripts\tableau\get-tableau-credentials.ps1
+.\scripts\tableau\start-tableau-tunnel.ps1
+```
+
+In Tableau, choose Amazon Redshift: host `localhost`, port `15439`, database `analytics`, temporary credentials returned by the script, TLS enabled. Pick the schema containing the tables needed for the analysis; the same connection has read-only access to `analytics_bi`, `analytics_marts`, `analytics_ml`, `analytics_staging`, `silver_staging`, `analytics` and `public`.
+
+The Tableau database principal has a **24-hour idle session limit** and the regional SSM setting permits up to **60 minutes of idle tunneling**. Neither guarantees an indefinitely connected session. Temporary credentials expire for new authentication; an established session can remain usable. Reconnect if SSM closes the tunnel.
+
+After the session, verify that the access instance has stopped. To stop it explicitly:
+
+```powershell
+.\scripts\tableau\stop-tableau-tunnel.ps1
+```
+
+Do not open Redshift to the public internet, commit temporary credentials, or leave the EC2 access host running unnecessarily. SQL grants and BI views are tracked in `scripts/redshift/`; Tableau workbook design and screenshots are managed separately in Notion.
+
+See [AWS SSM port forwarding](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html) and [Tableau Amazon Redshift connection](https://help.tableau.com/current/pro/desktop/en-us/examples_amazonredshift.htm).
 
 ## Failure diagnosis
 
