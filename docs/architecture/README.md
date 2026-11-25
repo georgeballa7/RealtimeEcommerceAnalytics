@@ -40,7 +40,6 @@ API Gateway, queues, DynamoDB, S3 and the orchestration services are regional se
 
 ## Ownership and evidence
 
-Terraform owns the network foundation, operational service resources, Glue, Redshift and the NAT controller. The controller owns the ephemeral gateway and its application default routes. CloudFormation owns the coordinator, Silver loader, dbt orchestrator and Tableau access stacks and their child resources. The branch retains declarations for selected IAM, eventing, log and SSM imports. Declarations alone do not establish state ownership. Review the state before proposing adoption.
-The November 23 audit recorded a coordinator schedule that differed from its stored stack template. Verify the live schedule, Lambda package and stack before redeployment. The November 24 retirement record concerns infrastructure ownership, independently of that runtime check.
+Terraform owns the network foundation, operational service resources, Glue, Redshift and the NAT controller. The controller owns the ephemeral gateway and its application default routes. CloudFormation owns the coordinator, Silver loader, dbt orchestrator and Tableau access stacks and their child resources. 
 
 [Network definitions](../../infrastructure/terraform/networking.tf) · [NAT controller](../../scripts/aws/phase6_nat_lifecycle_lambda.py) · [Stack templates](../../infrastructure/cloudformation) · [Diagram sources and rendering](diagrams/README.md)
