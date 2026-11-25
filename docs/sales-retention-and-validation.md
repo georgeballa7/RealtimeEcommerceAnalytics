@@ -20,16 +20,7 @@ ORDER BY sales_month DESC, source_system;
 
 ## Verify a reporting refresh
 
-Choose a Europe/Berlin processing date and slot, then carry its batch ID through the checks. A successful webhook response establishes queue acceptance. A reporting refresh requires all of the following evidence.
-
-| Boundary | Evidence for the same slot | What it establishes |
-| --- | --- | --- |
-| PostgreSQL → Glue | Required generation and lifecycle markers, settled projection, available RDS instance and active extraction lease | Source writes have settled before the five JDBC reads begin. Reads across tables lack a shared PostgreSQL transaction snapshot. |
-| Bronze → Silver | Source, accepted and quarantined counts by table. Unique business keys, valid parent references, verified identities and exact GBP amounts. | Each input row is accounted for. Inspect quarantine reasons before interpreting missing sales. |
-| Silver → Redshift | Published manifest key and digest, matching warehouse load ledger and reconciled staging counts | All five live Shopify tables were replaced together in the warehouse transaction. Historical backfill has a separate load path. |
-| Redshift → Tableau | Warehouse acknowledgement, matching dbt task with exit code zero, passing data tests, and workbook date/source filters and refresh mode | The expected batch reached the marts and the workbook is displaying the intended slice. |
-
-If orders are missing, locate the first boundary without matching evidence. Replaying a Shopify transaction can create a second external write. Start with the existing delivery and batch identifiers. [Slot verification and recovery](operations/README.md#verify-a-slot-with-read-only-access) · [Silver table contract](data-model/README.md#live-shopify-silver-contract)
+Compare the same reporting month and source. For a live connection, trace the slot to its warehouse acknowledgement and successful dbt build. For an extract or CSV, also check when the workbook data was refreshed. The [slot verification guide](operations/README.md#verify-a-slot-with-read-only-access) gives the checks in order.
 
 ## Which customers are likely to go 30 days without another order?
 

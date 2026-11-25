@@ -55,6 +55,8 @@ flowchart TD
 
 All slot times use Europe/Berlin. EventBridge Scheduler starts the generator at 08:00 and 16:00. It uses approved customer and catalog identities and verified GBP prices to create controlled transactions in the development store. The slot runner writes the completion marker only after successful generation. The 16:30 lifecycle task handles simulated cancellations and refunds and publishes a settled marker for the day. If a remote write is ambiguous, inspect its operation journal and read back the Shopify result before repeating a write.
 
+The historical identity foundation reconciled 5,942 customers with Shopify and the catalog approval manifest included 3,408 eligible stock codes. Operation journals, leases and Shopify read-back protect identity creation during retries. The [historical Silver contract](../../data/schemas/canonical-silver-v1.md) defines the input data.
+
 Historical calibration and deterministic backfill are separate inputs. The historical synthetic orders, order items and cancellations enter Silver staging through their historical load path. A live webhook has its own shop, topic, delivery ID and payload. Keep source provenance through aggregation.
 
 [Slot runner](../../scripts/phase5_slot_runner.py) · [Generation](../../scripts/generate_shopify_live_orders.py) · [Lifecycle](../../scripts/run_phase5_lifecycle.py) · [Historical reconciliation](../../scripts/reconcile_synthetic_backfill.py)
@@ -112,6 +114,6 @@ The dbt orchestrator reconciles acknowledged slots when event rules fire. It che
 
 ## Churn and reporting
 
-The dbt build refreshes labeled monthly training examples and an unlabeled current feature set. A separate Redshift SQL script fits priors and conditional likelihoods. Prediction and evaluation views combine those parameters with the features at query time. An automatic classifier refit after each build is unverified. Tableau Desktop connects through an SSM port-forwarding session and queries the chosen serving views. Check the workbook's reporting month and whether it uses a live connection or an extract when comparing successive runs.
+A successful dbt build refreshes the feature marts. The scoring views then use the stored classifier parameters. Refitting those parameters is a separate warehouse operation.
 
 [Sales and retention measures](../sales-retention-and-validation.md) · [BI views](../../scripts/redshift/tableau_bi_views.sql) · [Tableau access](../operations/README.md#connect-tableau-to-private-redshift)

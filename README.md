@@ -34,50 +34,12 @@ The platform is designed around an important constraint: **the private applicati
 
 ## Explore the project
 
-### Business questions and system design
-
-Start with [sales and customer retention](docs/sales-retention-and-validation.md) for the reporting outcomes, then follow the [architecture guide](docs/architecture/README.md) and [pipeline walkthrough](docs/pipelines/README.md). They explain the design decisions, processing guarantees, networking, and what happens when a service fails.
-
-Then visit [data modeling and lineage](docs/data-model/README.md) for the operational ERDs, analytical fact/dimension tables, and churn model. The churn analysis includes limitations: its score estimates a defined inactivity outcome on synthetic/historical data; it is not a validated commercial prediction product.
-
-### Run or extend the code
-
-Start with [local setup in the operations guide](docs/operations/README.md#local-setup), which separates **safe local checks** from **AWS-changing operations**.
-
-Useful entry points:
-
-| Task | Start here |
+| Question | Guide |
 | --- | --- |
-| Follow an event end to end | [Pipeline walkthrough](docs/pipelines/README.md) |
-| Find the webhook handler and projection code | [Capture and projection](docs/pipelines/README.md#capture-and-projection) |
-| Understand schemas and data quality | [Data models](docs/data-model/README.md) and [Silver contract](docs/data-model/README.md#live-shopify-silver-contract) |
-| Work with dbt models and SQL | [dbt models](analytics/dbt/models) and [Redshift SQL](analytics/redshift) |
-| Inspect Terraform and AWS ownership | [Infrastructure reference](infrastructure/terraform/README.md) and [architecture decisions](docs/architecture/README.md) |
-| Investigate a pipeline failure | [Operations and recovery](docs/operations/README.md#failure-diagnosis) |
+| What do the sales and retention results mean? | [Sales, retention and validation](docs/sales-retention-and-validation.md) |
+| Why these AWS services and network boundaries? | [Architecture and decisions](docs/architecture/README.md) |
+| How does a Shopify delivery reach a report? | [Pipeline walkthrough](docs/pipelines/README.md) |
+| Which warehouse tables connect, and how do I model them in Tableau? | [Star schema and Tableau relationships](docs/data-model/README.md#analytical-star-schema) |
+| How do I run the local checks, connect Tableau or investigate a failed slot? | [Operations and local setup](docs/operations/README.md) |
 
-## Run the local checks
-
-These commands **do not require AWS access** and **do not create Shopify transactions**. From the repository root with Python 3.12 or newer:
-
-```powershell
-python -m venv .venv
-# Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
-
-python -m pip install -e ".[dev,api,shopify,historical,postgres,aws]"
-ruff check src tests
-python -m pytest -q tests/unit
-```
-
-On macOS/Linux, activate with `source .venv/bin/activate`. The unit tests use fixtures and mocks; integration and end-to-end tests have different requirements. See [operations](docs/operations/README.md) before invoking cloud-connected scripts.
-
-For the original historical workbook workflow, use the [historical scripts guide](scripts/README.md). For the live platform, do **not** use sample Terraform variables against a deployed account: infrastructure plans require the complete, verified deployment settings.
-
-## Documentation map
-
-- [Architecture and network](docs/architecture/README.md) — high-level system, routing, security and design trade-offs.
-- [Pipelines and recovery boundaries](docs/pipelines/README.md) — generation, webhook capture, projection, Glue, Redshift, dbt and churn.
-- [Database models and ERDs](docs/data-model/README.md) — tables, keys, grains and data lineage.
-- [Operations and developer setup](docs/operations/README.md) — how to inspect, test, troubleshoot and deploy safely.
-- [Sales and customer retention](docs/sales-retention-and-validation.md) — sales definitions, refresh evidence, churn evaluation and Tableau views.
-- [Architecture diagrams and editable sources](docs/architecture/diagrams/README.md) — overview, network, ingestion, warehouse and NAT.
+For the historical workbook workflow, use the [historical ingestion commands](scripts/README.md). For infrastructure planning, use the [Terraform module instructions](infrastructure/terraform/README.md).

@@ -2,26 +2,7 @@
 
 **Environment:** `eu-central-1`, project AWS account. Managed Terraform state is in a versioned S3 backend under `ecommerce/demo/terraform.tfstate` with native lockfiles. Do not commit state, local `backend.tf`, credentials, full `tfvars` or plan artifacts.
 
-## Deployed network (21 November 2026)
-
-The former continuously running shared NAT Gateway was **deleted via Terraform** on 21 November 2026. Terraform also removed its two application subnet `0.0.0.0/0` routes, preserving both S3 Gateway Endpoint routes. The current desired `nat_gateway_mode` is **`on_demand`**.
-
-Terraform continues managing the VPC, two public subnets, two private application subnets, two isolated database subnets, the Internet Gateway, reserved public IPv4 EIP, route tables, NAT lifecycle IAM, Lambda, CloudWatch log group and EventBridge Scheduler. **Terraform must not own the ephemeral NAT gateway or its private application default routes** in on-demand mode.
-
-The on-demand NAT controller prewarms at **07:30** and **15:30 Europe/Berlin** for the 08:00/16:00 generators. The lifecycle runs at **16:30**; NAT is deleted after verified completion and quiet-period checks, potentially before the 18:00 operational target. The controller requires its DynamoDB lock, validates queue/worker/Glue activity before NAT deletion, and is intended to leave **no NAT** running outside required processing windows.
-
-For each processing slot, verify the warehouse acknowledgement, dbt exit status and actual NAT release using the [operations guide](../../docs/operations/README.md).
-
-A CloudWatch alarm `ecommerce-demo-nat-lifecycle-errors` alerts the confirmed infrastructure SNS mailbox when the controller fails or the outbound routes are not active during the 07:50, 15:50 or 16:20 preflight checks. The readiness monitor does not itself create AWS resources; the lifecycle controller already handles idempotent provisioning and recovery.
-
-A NAT Gateway incurs charges while provisioned; the *reserved public IPv4 address may still incur hourly charges when unattached*. NAT creation/deletion also has lead time, so a running ECS task cannot assume continuous internet egress outside the scheduled windows.
-
-## Additional deployed components
-
-- Private RDS PostgreSQL, **on-demand** ECS/Fargate tasks and their active ECR repositories, SQS/DLQ, DynamoDB, S3 landing and replay data, CloudWatch and the Phase 5 API Gateway/Lambda pipeline. Legacy ALB + always-on ECS API, consumer service, and Spark demo definitions were retired from this branch; the November 24 engineering record confirms the reviewed retirement of 23 legacy resources and subsequent cleanup of obsolete outputs.
-- Glue Silver processing and Redshift Serverless warehouse, with a pinned dbt ECS task definition.
-- Phase 6 coordinator/loader, Phase 7 dbt orchestration and Tableau SSM access are deployed as **existing CloudFormation stacks**. CloudFormation owns the four project stacks and their children; stack imports were removed from Terraform to preserve a single control-plane owner. Their CloudFormation templates remain version-controlled. Separate Phase 6/7 eventing and IAM imports remain staged and require review before any Terraform apply.
-- The RDS instance can be stopped operationally. Its temporary stopped state is not a desired Terraform resource deletion.
+[Network topology and ownership](../../docs/architecture/README.md) · [Runtime schedules and cost controls](../../docs/operations/README.md#availability-and-cost-controls)
 
 ## Planning and operational safeguards
 
@@ -43,10 +24,6 @@ Never run a full `terraform apply` with default/partial image variables against 
 The previous `scripts/aws/plan_phase7_nat_cutover.ps1` and `apply_phase7_nat_cutover.ps1` were **one-time, static-to-on-demand migration tools**. They are no longer appropriate after the completed cutover and must not be re-run.
 
 To roll back in a verified quiet window, set `nat_gateway_mode = "static"` and `stage_nat_lifecycle = true` with all other **deployed** input variables pinned, review the exact Terraform plan, and ensure the controller is disabled while the Terraform-owned static NAT and routes are restored. Preserve the original EIP.
-
-## Cost control and security
-
-Keep the AWS-account budget alerts separate from any third-party training subscription charges. Budgets are notifications, not hard spending limits; monitor EIP, NAT hours, Redshift compute/storage, RDS, Fargate, logs and data transfer. S3 Gateway Endpoint access must remain private and avoid unnecessary NAT data charges. The project is a cost-controlled learning environment, not a production high-availability configuration; review Multi-AZ, monitoring, alerting, security, and operational recovery before production use.
 
 ### Current-state variable reconstruction
 

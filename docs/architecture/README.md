@@ -13,10 +13,6 @@ A second deliberate boundary is network cost: application tasks and the database
 
 **How to read the diagrams:** Start with the [system overview](diagrams/exports/overview.svg), then use the network diagram below to understand *where* workloads run. Follow the [pipeline walkthrough](../pipelines/README.md) for *when* data moves, and the [data models](../data-model/README.md) for *what* each stage stores.
 
-## Two clocks, one traceable batch
-
-The platform has two clocks. Shopify can deliver an event whenever an order changes. Analysts see the change after a processing slot completes, a validated snapshot reaches Redshift and dbt builds the marts. The webhook response therefore establishes acceptance into a durable queue. The warehouse ledger and dbt marker establish analytical freshness.
-
 ## Deployment and routing
 
 ![Frankfurt VPC routing, database placement and S3 path](diagrams/exports/network.svg)
